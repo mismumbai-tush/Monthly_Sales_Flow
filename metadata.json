@@ -1,0 +1,6 @@
+{
+  "name": "ProSales Dashboard",
+  "description": "A professional sales management dashboard with multi-role access, KPI tracking, and Google Sheets synchronization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
