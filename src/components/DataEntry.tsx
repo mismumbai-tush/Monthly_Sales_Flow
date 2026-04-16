@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/src/lib/supabase';
 import { Profile } from '@/src/types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -28,21 +28,30 @@ interface UnitGroup {
 }
 
 export default function DataEntry({ profile }: DataEntryProps) {
-  const [selectedBranch, setSelectedBranch] = useState<string>(profile?.branch_ids?.[0] || 'default_branch');
+  const [selectedBranch, setSelectedBranch] = useState<string>('');
   const [unitGroups, setUnitGroups] = useState<UnitGroup[]>([
     { 
-      id: crypto.randomUUID(), 
+      id: Math.random().toString(36).substring(2, 11), 
       unitName: '', 
-      customers: [{ id: crypto.randomUUID(), customerName: '', targetAmount: 0, actualAmount: 0 }] 
+      customers: [{ id: Math.random().toString(36).substring(2, 11), customerName: '', targetAmount: 0, actualAmount: 0 }] 
     }
   ]);
   const [loading, setLoading] = useState(false);
 
+  // Sync selectedBranch when profile loads
+  useEffect(() => {
+    if (profile?.branch_ids && profile.branch_ids.length > 0 && !selectedBranch) {
+      setSelectedBranch(profile.branch_ids[0]);
+    } else if (profile && !profile.branch_ids?.length && !selectedBranch) {
+      setSelectedBranch('default_branch');
+    }
+  }, [profile, selectedBranch]);
+
   const addUnitGroup = () => {
     setUnitGroups([...unitGroups, { 
-      id: crypto.randomUUID(), 
+      id: Math.random().toString(36).substring(2, 11), 
       unitName: '', 
-      customers: [{ id: crypto.randomUUID(), customerName: '', targetAmount: 0, actualAmount: 0 }] 
+      customers: [{ id: Math.random().toString(36).substring(2, 11), customerName: '', targetAmount: 0, actualAmount: 0 }] 
     }]);
   };
 
@@ -54,7 +63,7 @@ export default function DataEntry({ profile }: DataEntryProps) {
   const addCustomer = (groupId: string) => {
     setUnitGroups(unitGroups.map(g => 
       g.id === groupId 
-        ? { ...g, customers: [...g.customers, { id: crypto.randomUUID(), customerName: '', targetAmount: 0, actualAmount: 0 }] }
+        ? { ...g, customers: [...g.customers, { id: Math.random().toString(36).substring(2, 11), customerName: '', targetAmount: 0, actualAmount: 0 }] }
         : g
     ));
   };
@@ -86,7 +95,10 @@ export default function DataEntry({ profile }: DataEntryProps) {
   };
 
   const handleSubmit = async () => {
-    if (!profile) return;
+    if (!profile) {
+      toast.error('User profile not loaded. Please wait.');
+      return;
+    }
     
     // Flatten and validate
     const flattenedData: any[] = [];
@@ -108,6 +120,11 @@ export default function DataEntry({ profile }: DataEntryProps) {
       return;
     }
 
+    if (!selectedBranch && profile.role !== 'Admin') {
+      toast.error('Please select a branch for this entry');
+      return;
+    }
+
     setLoading(true);
     try {
       const now = new Date();
@@ -124,45 +141,56 @@ export default function DataEntry({ profile }: DataEntryProps) {
         target_amount: e.targetAmount,
         actual_amount: e.actualAmount,
         salesperson_id: profile.id,
-        branch_id: selectedBranch
+        branch_id: selectedBranch || 'default_branch'
       }));
+
+      console.log('Submitting sales data:', salesData);
 
       // 1. Save to Supabase
       const { error: dbError } = await supabase.from('sales_data').insert(salesData);
-      if (dbError) throw dbError;
-
-      // 2. Sync to Google Sheets
-      const sheetData = salesData.map(s => [
-        s.customer_name,
-        s.unit_name,
-        s.month,
-        s.year,
-        s.target_unit,
-        s.actual_unit,
-        s.target_amount,
-        s.actual_amount,
-        profile.full_name || profile.email
-      ]);
-
-      const response = await fetch('/api/sync-sheets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: sheetData })
-      });
-
-      if (!response.ok) {
-        console.warn('Google Sheets sync failed');
-        toast.warning('Data saved to database, but Google Sheets sync failed.');
-      } else {
-        toast.success('Data submitted successfully!');
+      if (dbError) {
+        console.error('Supabase Insert Error:', dbError);
+        throw new Error(`Database error: ${dbError.message}`);
       }
 
-      // Reset form
+      // 2. Sync to Google Sheets (Optional, don't block if fails)
+      try {
+        const sheetData = salesData.map(s => [
+          s.customer_name,
+          s.unit_name,
+          s.month,
+          s.year,
+          s.target_unit,
+          s.actual_unit,
+          s.target_amount,
+          s.actual_amount,
+          profile.full_name || profile.email
+        ]);
+
+        const response = await fetch('/api/sync-sheets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: sheetData })
+        });
+
+        if (!response.ok) {
+          console.warn('Google Sheets sync failed');
+          toast.warning('Data saved to database, but Google Sheets sync failed.');
+        } else {
+          toast.success('Data submitted successfully!');
+        }
+      } catch (sheetErr) {
+        console.error('Sheets sync error:', sheetErr);
+        toast.warning('Data saved, but failed to sync with Google Sheets.');
+      }
+
+      // Reset form on success
       setUnitGroups([{ 
-        id: crypto.randomUUID(), 
+        id: Math.random().toString(36).substring(2, 11), 
         unitName: '', 
-        customers: [{ id: crypto.randomUUID(), customerName: '', targetAmount: 0, actualAmount: 0 }] 
+        customers: [{ id: Math.random().toString(36).substring(2, 11), customerName: '', targetAmount: 0, actualAmount: 0 }] 
       }]);
+      
     } catch (error: any) {
       console.error('Submission error:', error);
       toast.error(error.message || 'Failed to submit data');
