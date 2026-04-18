@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Trash2, Save, Loader2, Database, Building2 } from 'lucide-react';
+import { Plus, Trash2, Save, Loader2, Database, Building2, LayoutGrid } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { UNITS } from '@/src/constants';
 
@@ -153,36 +154,7 @@ export default function DataEntry({ profile }: DataEntryProps) {
         throw new Error(`Database error: ${dbError.message}`);
       }
 
-      // 2. Sync to Google Sheets (Optional, don't block if fails)
-      try {
-        const sheetData = salesData.map(s => [
-          s.customer_name,
-          s.unit_name,
-          s.month,
-          s.year,
-          s.target_unit,
-          s.actual_unit,
-          s.target_amount,
-          s.actual_amount,
-          profile.full_name || profile.email
-        ]);
-
-        const response = await fetch('/api/sync-sheets', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ data: sheetData })
-        });
-
-        if (!response.ok) {
-          console.warn('Google Sheets sync failed');
-          toast.warning('Data saved to database, but Google Sheets sync failed.');
-        } else {
-          toast.success('Data submitted successfully!');
-        }
-      } catch (sheetErr) {
-        console.error('Sheets sync error:', sheetErr);
-        toast.warning('Data saved, but failed to sync with Google Sheets.');
-      }
+      toast.success('Data submitted successfully!');
 
       // Reset form on success
       setUnitGroups([{ 
@@ -199,6 +171,22 @@ export default function DataEntry({ profile }: DataEntryProps) {
     }
   };
 
+  if (loading && unitGroups.length === 1 && !unitGroups[0].unitName) {
+    return (
+      <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500 max-w-6xl mx-auto pb-20">
+        <Skeleton className="h-24 w-full rounded-2xl" />
+        <div className="flex justify-between items-end">
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-48" />
+            <Skeleton className="h-4 w-64" />
+          </div>
+          <Skeleton className="h-12 w-40 rounded-xl" />
+        </div>
+        <Skeleton className="h-[300px] w-full rounded-2xl" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500 max-w-6xl mx-auto pb-20">
       {profile?.role !== 'Sales Person' && profile?.branch_ids && profile.branch_ids.length > 1 && (
@@ -209,7 +197,7 @@ export default function DataEntry({ profile }: DataEntryProps) {
                 <Building2 size={24} />
               </div>
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-0.5">Active Branch</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-foreground mb-0.5">Active Branch</p>
                 <h3 className="text-lg font-bold">Selecting Branch for Data Entry</h3>
               </div>
             </div>
@@ -229,12 +217,12 @@ export default function DataEntry({ profile }: DataEntryProps) {
         </Card>
       )}
 
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-4">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">New Sales Entry</h2>
-          <p className="text-muted-foreground font-medium">Group entries by Unit for {new Date().toLocaleString('default', { month: 'long' })} {new Date().getFullYear()}</p>
+          <h2 className="text-xl md:text-2xl font-bold tracking-tight">New Sales Entry</h2>
+          <p className="text-xs md:text-sm text-muted-foreground font-medium italic">Entries for {new Date().toLocaleString('default', { month: 'long' })} {new Date().getFullYear()}</p>
         </div>
-        <Button onClick={handleSubmit} disabled={loading} className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl px-8 shadow-lg shadow-primary/20 font-bold">
+        <Button onClick={handleSubmit} disabled={loading} className="w-full md:w-auto bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl px-8 py-6 md:py-4 shadow-xl shadow-primary/20 font-bold">
           {loading ? <Loader2 className="mr-2 animate-spin" /> : <Save className="mr-2" />}
           Submit All Data
         </Button>
@@ -243,16 +231,16 @@ export default function DataEntry({ profile }: DataEntryProps) {
       <div className="space-y-6">
         {unitGroups.map((group) => (
           <Card key={group.id} className="border-border shadow-sm rounded-2xl bg-card overflow-hidden border-l-4 border-l-primary">
-            <CardHeader className="bg-secondary/20 border-b border-border py-4 px-6 flex flex-row items-center justify-between space-y-0">
-              <div className="flex items-center gap-4 flex-1 max-w-md">
-                <div className="bg-primary/10 p-2 rounded-lg text-primary">
-                  <Database size={20} />
+            <CardHeader className="bg-secondary/20 border-b border-border py-4 px-4 md:px-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3 w-full md:max-w-md">
+                <div className="bg-primary/10 p-2 rounded-lg text-primary shrink-0">
+                  <Database size={18} />
                 </div>
-                <div className="flex-1">
-                  <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1 block">Select Unit</Label>
+                <div className="flex-1 min-w-0">
+                  <Label className="text-[10px] font-black uppercase tracking-widest text-foreground mb-1 block">Unit Category</Label>
                   <Select value={group.unitName} onValueChange={(v) => updateUnitName(group.id, v)}>
-                    <SelectTrigger className="bg-card border-border shadow-none h-10 font-bold">
-                      <SelectValue placeholder="Choose a Unit..." />
+                    <SelectTrigger className="bg-card border-border shadow-none h-9 font-bold text-xs truncate">
+                      <SelectValue placeholder="Select Unit..." />
                     </SelectTrigger>
                     <SelectContent>
                       {UNITS.filter(u => !unitGroups.some(g => g.unitName === u && g.id !== group.id)).map(u => (
@@ -266,56 +254,58 @@ export default function DataEntry({ profile }: DataEntryProps) {
                 variant="ghost" 
                 size="sm" 
                 onClick={() => removeUnitGroup(group.id)}
-                className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 font-bold"
+                className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 font-bold text-[10px] uppercase tracking-tighter self-end md:self-auto"
               >
-                <Trash2 size={16} className="mr-2" />
-                Remove Unit
+                <Trash2 size={14} className="mr-1.5" />
+                Delete Unit
               </Button>
             </CardHeader>
             <CardContent className="p-6">
               <div className="space-y-4">
                 <div className="grid grid-cols-12 gap-4 px-2 hidden md:grid">
-                  <div className="col-span-5 text-[10px] font-black uppercase tracking-widest text-muted-foreground">Customer Name</div>
-                  <div className="col-span-3 text-[10px] font-black uppercase tracking-widest text-muted-foreground">Plan / Target (Amt)</div>
-                  <div className="col-span-3 text-[10px] font-black uppercase tracking-widest text-muted-foreground">Actual (Amt)</div>
+                  <div className="col-span-5 text-[10px] font-black uppercase tracking-widest text-foreground">Customer Name</div>
+                  <div className="col-span-3 text-[10px] font-black uppercase tracking-widest text-foreground">Plan / Target (Amt)</div>
+                  <div className="col-span-3 text-[10px] font-black uppercase tracking-widest text-foreground">Actual (Amt)</div>
                   <div className="col-span-1"></div>
                 </div>
                 
                 {group.customers.map((customer) => (
-                  <div key={customer.id} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center p-3 bg-secondary/5 rounded-xl border border-border/30 group transition-all hover:border-border/60">
-                    <div className="md:col-span-5">
-                      <Label className="md:hidden text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1 block">Customer Name</Label>
+                  <div key={customer.id} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end p-4 bg-secondary/5 rounded-2xl border border-border/30 group transition-all hover:border-border/60 hover:bg-secondary/10">
+                    <div className="md:col-span-5 space-y-1.5">
+                      <Label className="text-[10px] font-black uppercase tracking-widest text-foreground ml-1">Customer Name</Label>
                       <Input 
-                        placeholder="Enter customer name" 
+                        placeholder="" 
                         value={customer.customerName}
                         onChange={(e) => updateCustomer(group.id, customer.id, 'customerName', e.target.value)}
-                        className="bg-card border-border shadow-none h-10 font-bold"
+                        className="bg-card border-border shadow-none h-11 font-bold text-sm rounded-xl focus-visible:ring-primary/20"
                       />
                     </div>
-                    <div className="md:col-span-3">
-                      <Label className="md:hidden text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1 block">Plan / Target (Amt)</Label>
+                    <div className="md:col-span-3 space-y-1.5">
+                      <Label className="text-[10px] font-black uppercase tracking-widest text-foreground ml-1">Plan / Target (Amt)</Label>
                       <Input 
                         type="number" 
+                        placeholder=""
                         value={customer.targetAmount || ''}
                         onChange={(e) => updateCustomer(group.id, customer.id, 'targetAmount', parseFloat(e.target.value) || 0)}
-                        className="bg-card border-border shadow-none h-10 font-bold"
+                        className="bg-card border-border shadow-none h-11 font-bold text-sm rounded-xl focus-visible:ring-primary/20"
                       />
                     </div>
-                    <div className="md:col-span-3">
-                      <Label className="md:hidden text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1 block">Actual (Amt)</Label>
+                    <div className="md:col-span-3 space-y-1.5">
+                      <Label className="text-[10px] font-black uppercase tracking-widest text-foreground ml-1">Actual Amount (Amt)</Label>
                       <Input 
                         type="number" 
+                        placeholder=""
                         value={customer.actualAmount || ''}
                         onChange={(e) => updateCustomer(group.id, customer.id, 'actualAmount', parseFloat(e.target.value) || 0)}
-                        className="bg-card border-border shadow-none h-10 font-bold"
+                        className="bg-card border-border shadow-none h-11 font-bold text-sm rounded-xl focus-visible:ring-primary/20"
                       />
                     </div>
-                    <div className="md:col-span-1 flex justify-end">
+                    <div className="md:col-span-1 flex justify-end pb-0.5">
                       <Button 
                         variant="ghost" 
                         size="icon" 
                         onClick={() => removeCustomer(group.id, customer.id)}
-                        className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0 h-10 w-10 rounded-lg"
+                        className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0 h-10 w-10 rounded-xl"
                       >
                         <Trash2 size={16} />
                       </Button>

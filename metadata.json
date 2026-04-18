@@ -1,6 +1,6 @@
 {
-  "name": "ProSales Dashboard",
-  "description": "A professional sales management dashboard with multi-role access, KPI tracking, and Google Sheets synchronization.",
+  "name": "Monthly Sales Flow App",
+  "description": "A professional sales management dashboard for Ginza Industries Ltd with multi-role access, KPI tracking, and Google Sheets synchronization.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }

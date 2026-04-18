@@ -1,9 +1,8 @@
 import express from "express";
+import compression from "compression";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
-import { google } from "googleapis";
-import { GoogleAuth } from "google-auth-library";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -15,48 +14,18 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(compression());
 
-  // API Routes
-  app.post("/api/sync-sheets", async (req, res) => {
-    try {
-      const { data } = req.body;
-      if (!data || !Array.isArray(data)) {
-        return res.status(400).json({ error: "Invalid data format" });
-      }
-
-      const auth = new GoogleAuth({
-        credentials: {
-          client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-          private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-        },
-        scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-      });
-
-      const sheets = google.sheets({ version: "v4", auth });
-      const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
-
-      if (!spreadsheetId) {
-        throw new Error("GOOGLE_SHEETS_ID is not configured");
-      }
-
-      // Append data to the sheet
-      // Assuming data is an array of arrays: [[customer, unit, month, year, target, actual]]
-      await sheets.spreadsheets.values.append({
-        spreadsheetId,
-        range: "Sheet1!A:F",
-        valueInputOption: "RAW",
-        requestBody: {
-          values: data,
-        },
-      });
-
-      res.json({ success: true });
-    } catch (error: any) {
-      console.error("Google Sheets Sync Error:", error);
-      res.status(500).json({ error: error.message });
-    }
+  // Security and CSP headers
+  app.use((req, res, next) => {
+    res.setHeader(
+      "Content-Security-Policy",
+      "default-src 'self' *; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: *; connect-src 'self' *; img-src 'self' data: *; style-src 'self' 'unsafe-inline' *; font-src 'self' data: *;"
+    );
+    next();
   });
+
+  app.use(express.json());
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

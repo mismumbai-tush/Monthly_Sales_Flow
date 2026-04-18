@@ -68,25 +68,26 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-6 font-sans">
+    <div className="min-h-screen flex items-center justify-center bg-background p-4 md:p-6 font-sans">
       <Card className="w-full max-w-lg shadow-2xl border-border rounded-3xl overflow-hidden bg-card">
-        <CardHeader className="space-y-2 text-center bg-secondary/30 pb-8 pt-10 border-b border-border">
+        <CardHeader className="space-y-2 text-center bg-secondary/30 pb-6 pt-8 md:pb-8 md:pt-10 border-b border-border">
           <div className="mx-auto mb-4">
             <img 
-              src="https://www.ginzalimited.com/cdn/shop/files/Ginza_logo.jpg?v=1668509673&width=850" 
+              src="https://www.ginzalimited.com/cdn/shop/files/Ginza_logo.png" 
               alt="GINZA Logo" 
-              className="h-16 object-contain"
+              className="h-12 md:h-16 object-contain"
               referrerPolicy="no-referrer"
             />
           </div>
-          <CardTitle className="text-2xl font-black tracking-tight text-foreground">
-            Ginza Industries Ltd.
+          <CardTitle className="text-xl md:text-2xl lg:text-3xl font-black tracking-tighter text-foreground flex flex-col items-center gap-1">
+            <span className="text-primary italic">SalesPulse</span>
+            <span className="text-[10px] md:text-sm font-bold uppercase tracking-[0.2em] text-muted-foreground/60">Ginza Industries Ltd</span>
           </CardTitle>
-          <CardDescription className="text-muted-foreground font-medium">
+          <CardDescription className="text-xs md:text-sm text-muted-foreground font-medium px-4">
             {isSignUp ? 'Create your professional account' : 'Access your SalesPulse dashboard'}
           </CardDescription>
         </CardHeader>
-        <CardContent className="p-8 space-y-6">
+        <CardContent className="p-5 md:p-8 space-y-6">
           <form onSubmit={handleAuth} className="space-y-4">
             {isSignUp && (
               <div className="grid grid-cols-2 gap-4">
