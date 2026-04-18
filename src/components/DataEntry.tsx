@@ -291,7 +291,7 @@ export default function DataEntry({ profile }: DataEntryProps) {
                       />
                     </div>
                     <div className="md:col-span-3 space-y-1.5">
-                      <Label className="text-[10px] font-black uppercase tracking-widest text-foreground ml-1">Actual Amount (Amt)</Label>
+                      <Label className="text-[10px] font-black uppercase tracking-widest text-foreground ml-1">Actual (Amt)</Label>
                       <Input 
                         type="number" 
                         placeholder=""

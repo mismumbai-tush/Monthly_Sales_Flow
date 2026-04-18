@@ -195,7 +195,7 @@ export default function App() {
           </div>
           <div className="text-center space-y-4">
             <div>
-              <p className="text-sm text-foreground font-black tracking-tighter">Initializing SalesPulse</p>
+              <p className="text-sm text-foreground font-black tracking-tighter">Initializing Sales Pulse</p>
               <p className="text-[10px] text-muted-foreground mt-1 uppercase tracking-widest font-bold">Ginza Industries Ltd</p>
             </div>
             
@@ -312,7 +312,7 @@ export default function App() {
                   referrerPolicy="no-referrer"
                 />
               </div>
-              <span className="font-extrabold text-lg tracking-tighter text-sidebar-foreground">SalesPulse</span>
+              <span className="font-extrabold text-lg tracking-tighter text-sidebar-foreground">Sales Pulse</span>
             </div>
             <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen(false)} className="text-sidebar-foreground/50 hover:text-sidebar-foreground">
               <X size={20} />
@@ -330,7 +330,7 @@ export default function App() {
               <div className="absolute inset-0 bg-gradient-to-tr from-primary/5 to-transparent" />
             </div>
             <div>
-              <h2 className="text-2xl font-black tracking-tighter text-sidebar-foreground leading-none">SalesPulse</h2>
+              <h2 className="text-2xl font-black tracking-tighter text-sidebar-foreground leading-none">Sales Pulse</h2>
               <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-sidebar-foreground/40 mt-1">Ginza Industries Ltd</p>
             </div>
           </div>

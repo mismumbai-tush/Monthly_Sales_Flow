@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  LineChart, Line, Cell
+  LineChart, Line, Cell, AreaChart, Area
 } from 'recharts';
 import { Users, Target, TrendingUp, Search, Filter, Loader2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -173,6 +173,14 @@ export default function Dashboard({ profile }: DashboardProps) {
     });
   }, [filteredData, salespersons]);
 
+  const monthlyTrendData = useMemo(() => {
+    return MONTHS.map(month => ({
+      name: month.substring(0, 3),
+      actual: filteredData.filter(d => d.month === month).reduce((acc, curr) => acc + curr.actual_amount, 0),
+      target: filteredData.filter(d => d.month === month).reduce((acc, curr) => acc + curr.target_amount, 0),
+    })).filter(d => d.actual > 0 || d.target > 0);
+  }, [filteredData]);
+
   if (loading) {
     return (
       <div className="space-y-8 animate-in fade-in duration-500">
@@ -209,7 +217,6 @@ export default function Dashboard({ profile }: DashboardProps) {
             <div className="text-[10px] lg:text-xs text-muted-foreground font-extrabold uppercase tracking-widest bg-secondary/80 px-2 lg:px-3 py-1 rounded-full whitespace-nowrap border border-border">
               Last View: {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
             </div>
-            <p className="text-xs text-muted-foreground font-medium">Use the options below to narrow down your data insights</p>
           </div>
         </div>
         
@@ -299,28 +306,28 @@ export default function Dashboard({ profile }: DashboardProps) {
       </div>
 
       {/* Bento Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        <Card className="border-border shadow-sm rounded-2xl flex flex-col justify-center p-4 bg-card border-l-4 border-l-blue-500">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <Card className="border-border shadow-sm rounded-xl flex flex-col justify-center py-3 px-4 bg-card border-l-4 border-l-blue-500 h-24">
           <p className="text-[10px] font-black uppercase tracking-widest text-foreground mb-1">Unique Customers</p>
-          <p className="text-2xl font-bold tracking-tight">{stats.totalCustomers}</p>
+          <p className="text-xl font-bold tracking-tight leading-[1.1]">{stats.totalCustomers}</p>
           <div className="text-[10px] text-blue-500 font-medium mt-1 flex items-center gap-1">
             <Users size={10} />
             Active Base
           </div>
         </Card>
 
-        <Card className="border-border shadow-sm rounded-2xl flex flex-col justify-center p-4 bg-card border-l-4 border-l-amber-500">
-          <p className="text-[10px] font-black uppercase tracking-widest text-foreground mb-1">Total Targets (Amt)</p>
-          <p className="text-2xl font-bold tracking-tight">₹{stats.totalTarget.toLocaleString()}</p>
+        <Card className="border-border shadow-sm rounded-xl flex flex-col justify-center py-3 px-4 bg-card border-l-4 border-l-amber-500 h-24">
+          <p className="text-[10px] font-black uppercase tracking-widest text-foreground mb-1">Total Target</p>
+          <p className="text-xl font-bold tracking-tight leading-[1.1]">₹{stats.totalTarget.toLocaleString()}</p>
           <div className="text-[10px] text-muted-foreground font-medium mt-1 flex items-center gap-1">
             <Target size={10} />
-            Budgeted Revenue
+            Budgeted
           </div>
         </Card>
 
-        <Card className="border-border shadow-sm rounded-2xl flex flex-col justify-center p-4 bg-card border-l-4 border-l-emerald-500">
-          <p className="text-[10px] font-black uppercase tracking-widest text-foreground mb-1">Total Sales (Amt)</p>
-          <p className="text-2xl font-bold tracking-tight text-emerald-600">₹{stats.totalActual.toLocaleString()}</p>
+        <Card className="border-border shadow-sm rounded-xl flex flex-col justify-center py-3 px-4 bg-card border-l-4 border-l-emerald-500 h-24">
+          <p className="text-[10px] font-black uppercase tracking-widest text-foreground mb-1">Total Sales</p>
+          <p className="text-xl font-bold tracking-tight text-emerald-600 leading-[1.1]">₹{stats.totalActual.toLocaleString()}</p>
           <div className="text-[10px] font-bold mt-1 flex items-center gap-1">
             {stats.totalTarget > 0 ? (
               <span className={stats.totalActual >= stats.totalTarget ? "text-emerald-500" : "text-amber-500"}>
@@ -347,8 +354,8 @@ export default function Dashboard({ profile }: DashboardProps) {
                   contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.05)', fontSize: '10px' }}
                 />
                 <Legend iconType="circle" wrapperStyle={{ fontSize: '9px', paddingTop: '5px' }} />
-                <Bar dataKey="target" fill="#E2E8F0" radius={[4, 4, 0, 0]} name="Target" animationDuration={500} />
-                <Bar dataKey="actual" fill="#4F46E5" radius={[4, 4, 0, 0]} name="Actual" animationDuration={500} />
+                <Bar dataKey="target" fill="#E2E8F0" radius={[4, 4, 0, 0]} name="Target" animationDuration={500} barSize={10} />
+                <Bar dataKey="actual" fill="#4F46E5" radius={[4, 4, 0, 0]} name="Actual" animationDuration={500} barSize={10} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -368,17 +375,16 @@ export default function Dashboard({ profile }: DashboardProps) {
                   contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.05)', fontSize: '10px' }}
                 />
                 <Legend iconType="circle" wrapperStyle={{ fontSize: '9px', paddingTop: '5px' }} />
-                <Bar dataKey="target" fill="#E2E8F0" radius={[0, 4, 4, 0]} name="Target" animationDuration={500} />
-                <Bar dataKey="actual" fill="#6366F1" radius={[0, 4, 4, 0]} name="Actual" animationDuration={500} />
+                <Bar dataKey="target" fill="#E2E8F0" radius={[0, 4, 4, 0]} name="Target" animationDuration={500} barSize={8} />
+                <Bar dataKey="actual" fill="#6366F1" radius={[0, 4, 4, 0]} name="Actual" animationDuration={500} barSize={8} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
       </div>
 
-      <div className="space-y-5">
-        {/* Full Width Row */}
-        <Card className="border-border shadow-sm rounded-2xl bg-card overflow-hidden h-[400px]">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <Card className="border-border shadow-sm rounded-2xl bg-card overflow-hidden h-[350px]">
           <CardHeader className="pb-1 pt-4">
             <CardTitle className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">Salesperson Revenue Performance</CardTitle>
           </CardHeader>
@@ -392,12 +398,40 @@ export default function Dashboard({ profile }: DashboardProps) {
                   contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '10px' }}
                   cursor={{ fill: '#f8fafc' }}
                 />
-                <Bar dataKey="actual" name="Actual Revenue" animationDuration={1000}>
+                <Bar dataKey="actual" name="Actual Revenue" animationDuration={1000} barSize={14}>
                   {salespersonChartData.map((_entry, index) => (
                     <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#4F46E5' : '#6366F1'} />
                   ))}
                 </Bar>
               </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        {/* Monthly Trend Chart */}
+        <Card className="border-border shadow-sm rounded-2xl bg-card overflow-hidden h-[350px]">
+          <CardHeader className="pb-1 pt-4">
+            <CardTitle className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">Monthly Achievement Trend</CardTitle>
+          </CardHeader>
+          <CardContent className="flex-1 pb-4 pt-2 overflow-hidden">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={monthlyTrendData}>
+                <defs>
+                  <linearGradient id="colorActual" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#4F46E5" stopOpacity={0.1}/>
+                    <stop offset="95%" stopColor="#4F46E5" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#64748B' }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#64748B' }} />
+                <Tooltip 
+                  contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '10px' }}
+                />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: '9px', paddingTop: '5px' }} />
+                <Area type="monotone" dataKey="actual" stroke="#4F46E5" fillOpacity={1} fill="url(#colorActual)" name="Actual" animationDuration={1500} />
+                <Line type="monotone" dataKey="target" stroke="#94A3B8" strokeDasharray="5 5" name="Target" dot={false} />
+              </AreaChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
