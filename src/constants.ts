@@ -21,5 +21,6 @@ export const UNITS = [
   'PRINTING',
   'TLU',
   'VAU',
-  'WARP'
+  'WARP',
+  'OTHER'
 ];
