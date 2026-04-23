@@ -1,341 +1,379 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/src/lib/supabase';
 import { Profile } from '@/src/types';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Trash2, Save, Loader2, Database, Building2, LayoutGrid } from 'lucide-react';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Plus, Save, Loader2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { UNITS } from '@/src/constants';
 
 interface DataEntryProps {
   profile: Profile | null;
+  view: 'planning' | 'actuals';
 }
 
-interface CustomerEntry {
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+interface SalesRow {
   id: string;
   customerName: string;
-  targetAmount: number;
-  actualAmount: number;
+  unit: string;
+  targets: Record<string, number>;
+  actuals: Record<string, number>;
+  dbIds?: Record<string, string>; // Map month to DB row ID
 }
 
-interface UnitGroup {
-  id: string;
-  unitName: string;
-  customers: CustomerEntry[];
-}
-
-export default function DataEntry({ profile }: DataEntryProps) {
-  const [selectedBranch, setSelectedBranch] = useState<string>('');
-  const [unitGroups, setUnitGroups] = useState<UnitGroup[]>([
-    { 
-      id: Math.random().toString(36).substring(2, 11), 
-      unitName: '', 
-      customers: [{ id: Math.random().toString(36).substring(2, 11), customerName: '', targetAmount: 0, actualAmount: 0 }] 
-    }
-  ]);
+export default function DataEntry({ profile, view }: DataEntryProps) {
+  const [rows, setRows] = useState<SalesRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [selectedBranch, setSelectedBranch] = useState<string>('');
+  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState<string>('All');
+  
+  const years = Array.from({ length: 11 }, (_, i) => 2026 + i);
 
-  // Sync selectedBranch when profile loads
+  const displayMonths = selectedMonth === 'All' ? MONTHS : [selectedMonth];
+  const displayShortMonths = selectedMonth === 'All' ? SHORT_MONTHS : [SHORT_MONTHS[MONTHS.indexOf(selectedMonth)]];
+
   useEffect(() => {
-    if (profile?.branch_ids && profile.branch_ids.length > 0 && !selectedBranch) {
+    if (profile?.branch_ids && profile.branch_ids.length > 0) {
       setSelectedBranch(profile.branch_ids[0]);
-    } else if (profile && !profile.branch_ids?.length && !selectedBranch) {
+    } else {
       setSelectedBranch('default_branch');
     }
-  }, [profile, selectedBranch]);
+  }, [profile]);
 
-  const addUnitGroup = () => {
-    setUnitGroups([...unitGroups, { 
-      id: Math.random().toString(36).substring(2, 11), 
-      unitName: '', 
-      customers: [{ id: Math.random().toString(36).substring(2, 11), customerName: '', targetAmount: 0, actualAmount: 0 }] 
-    }]);
-  };
-
-  const removeUnitGroup = (id: string) => {
-    if (unitGroups.length === 1) return;
-    setUnitGroups(unitGroups.filter(g => g.id !== id));
-  };
-
-  const addCustomer = (groupId: string) => {
-    setUnitGroups(unitGroups.map(g => 
-      g.id === groupId 
-        ? { ...g, customers: [...g.customers, { id: Math.random().toString(36).substring(2, 11), customerName: '', targetAmount: 0, actualAmount: 0 }] }
-        : g
-    ));
-  };
-
-  const removeCustomer = (groupId: string, customerId: string) => {
-    setUnitGroups(unitGroups.map(g => {
-      if (g.id === groupId) {
-        if (g.customers.length === 1) return g;
-        return { ...g, customers: g.customers.filter(c => c.id !== customerId) };
-      }
-      return g;
-    }));
-  };
-
-  const updateUnitName = (groupId: string, name: string) => {
-    setUnitGroups(unitGroups.map(g => g.id === groupId ? { ...g, unitName: name } : g));
-  };
-
-  const updateCustomer = (groupId: string, customerId: string, field: keyof CustomerEntry, value: string | number) => {
-    setUnitGroups(unitGroups.map(g => {
-      if (g.id === groupId) {
-        return {
-          ...g,
-          customers: g.customers.map(c => c.id === customerId ? { ...c, [field]: value } : c)
-        };
-      }
-      return g;
-    }));
-  };
-
-  const handleSubmit = async () => {
-    if (!profile) {
-      toast.error('User profile not loaded. Please wait.');
-      return;
+  useEffect(() => {
+    if (view === 'planning') {
+      fetchExistingData(); // Still check if planning exists for the selected year
+    } else {
+      fetchExistingData();
     }
-    
-    // Flatten and validate
-    const flattenedData: any[] = [];
-    let isValid = true;
+  }, [view, selectedBranch, selectedYear]);
 
-    unitGroups.forEach(g => {
-      if (!g.unitName) isValid = false;
-      g.customers.forEach(c => {
-        if (!c.customerName) isValid = false;
-        flattenedData.push({
-          unitName: g.unitName,
-          ...c
-        });
-      });
-    });
-
-    if (!isValid) {
-      toast.error('Please fill in all Unit names and Customer names');
-      return;
-    }
-
-    if (!selectedBranch && profile.role !== 'Admin') {
-      toast.error('Please select a branch for this entry');
-      return;
-    }
-
+  const fetchExistingData = async () => {
+    if (!profile || !selectedBranch) return;
     setLoading(true);
     try {
-      const now = new Date();
-      const month = now.toLocaleString('default', { month: 'long' });
-      const year = now.getFullYear();
+      const { data, error } = await supabase
+        .from('sales_data')
+        .select('*')
+        .eq('year', selectedYear)
+        .eq('branch_id', selectedBranch);
 
-      const salesData = flattenedData.map(e => ({
-        customer_name: e.customerName,
-        unit_name: e.unitName,
-        month,
-        year,
-        target_unit: 0,
-        actual_unit: 0,
-        target_amount: e.targetAmount,
-        actual_amount: e.actualAmount,
-        salesperson_id: profile.id,
-        branch_id: selectedBranch || 'default_branch'
-      }));
+      if (error) throw error;
 
-      console.log('Submitting sales data:', salesData);
-
-      // 1. Save to Supabase
-      const { error: dbError } = await supabase.from('sales_data').insert(salesData);
-      if (dbError) {
-        console.error('Supabase Insert Error:', dbError);
-        throw new Error(`Database error: ${dbError.message}`);
+      if (data && data.length > 0) {
+        // Group data by customer and unit
+        const grouped: Record<string, SalesRow> = {};
+        data.forEach(item => {
+          const key = `${item.customer_name}-${item.unit_name}`;
+          if (!grouped[key]) {
+            grouped[key] = {
+              id: key,
+              customerName: item.customer_name,
+              unit: item.unit_name,
+              targets: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
+              actuals: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
+              dbIds: {}
+            };
+          }
+          grouped[key].targets[item.month] = item.target_amount;
+          grouped[key].actuals[item.month] = item.actual_amount;
+          if (grouped[key].dbIds) {
+            grouped[key].dbIds![item.month] = item.id;
+          }
+        });
+        setRows(Object.values(grouped));
+      } else if (view === 'planning') {
+        // If planning and no data, show empty rows
+        const initialRows: SalesRow[] = Array.from({ length: 5 }).map(() => ({
+          id: Math.random().toString(36).substring(2, 11),
+          customerName: '',
+          unit: '',
+          targets: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
+          actuals: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
+        }));
+        setRows(initialRows);
+      } else {
+        setRows([]);
       }
-
-      toast.success('Data submitted successfully!');
-
-      // Reset form on success
-      setUnitGroups([{ 
-        id: Math.random().toString(36).substring(2, 11), 
-        unitName: '', 
-        customers: [{ id: Math.random().toString(36).substring(2, 11), customerName: '', targetAmount: 0, actualAmount: 0 }] 
-      }]);
-      
     } catch (error: any) {
-      console.error('Submission error:', error);
-      toast.error(error.message || 'Failed to submit data');
+      toast.error('Failed to fetch data: ' + error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  if (loading && unitGroups.length === 1 && !unitGroups[0].unitName) {
-    return (
-      <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500 max-w-6xl mx-auto pb-20">
-        <Skeleton className="h-24 w-full rounded-2xl" />
-        <div className="flex justify-between items-end">
-          <div className="space-y-2">
-            <Skeleton className="h-8 w-48" />
-            <Skeleton className="h-4 w-64" />
-          </div>
-          <Skeleton className="h-12 w-40 rounded-xl" />
-        </div>
-        <Skeleton className="h-[300px] w-full rounded-2xl" />
-      </div>
-    );
-  }
+  const addRow = () => {
+    setRows([...rows, {
+      id: Math.random().toString(36).substring(2, 11),
+      customerName: '',
+      unit: '',
+      targets: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
+      actuals: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
+    }]);
+  };
+
+  const removeRow = (id: string) => {
+    setRows(rows.filter(r => r.id !== id));
+  };
+
+  const updateRow = (id: string, field: string, value: any) => {
+    setRows(rows.map(r => r.id === id ? { ...r, [field]: value } : r));
+  };
+
+  const updateMonthlyValue = (rowId: string, month: string, type: 'targets' | 'actuals', value: number) => {
+    setRows(rows.map(r => {
+      if (r.id === rowId) {
+        return {
+          ...r,
+          [type]: { ...r[type], [month]: value }
+        };
+      }
+      return r;
+    }));
+  };
+
+  const handleSubmit = async () => {
+    if (!profile) return;
+    setLoading(true);
+    try {
+      const payload: any[] = [];
+      const updatePayload: any[] = [];
+
+      for (const row of rows) {
+        if (!row.customerName || !row.unit) continue;
+
+        MONTHS.forEach(month => {
+          const entry = {
+            customer_name: row.customerName,
+            unit_name: row.unit,
+            month,
+            year: selectedYear,
+            target_amount: row.targets[month],
+            actual_amount: row.actuals[month],
+            salesperson_id: profile.id,
+            branch_id: selectedBranch,
+            target_unit: 0,
+            actual_unit: 0
+          };
+
+          if (view === 'actuals' && row.dbIds?.[month]) {
+            updatePayload.push({
+              id: row.dbIds[month],
+              ...entry
+            });
+          } else {
+            payload.push(entry);
+          }
+        });
+      }
+
+      if (payload.length > 0) {
+        const { error } = await supabase.from('sales_data').insert(payload);
+        if (error) throw error;
+      }
+
+      if (updatePayload.length > 0) {
+        const { error } = await supabase.from('sales_data').upsert(updatePayload);
+        if (error) throw error;
+      }
+
+      toast.success('Data saved successfully!');
+      if (view === 'planning') {
+        // Clear or refresh? User said "Save hoke New Tab Me Save ho" 
+        // This implies they want to see it in actuals tab now.
+      } else {
+        fetchExistingData();
+      }
+    } catch (error: any) {
+      toast.error('Save failed: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500 max-w-6xl mx-auto pb-20">
-      {profile?.role !== 'Sales Person' && profile?.branch_ids && profile.branch_ids.length > 1 && (
-        <Card className="border-border shadow-md rounded-2xl bg-card overflow-hidden">
-          <CardContent className="p-6 flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="bg-primary/10 p-3 rounded-2xl text-primary">
-                <Building2 size={24} />
-              </div>
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-widest text-foreground mb-0.5">Active Branch</p>
-                <h3 className="text-lg font-bold">Selecting Branch for Data Entry</h3>
-              </div>
-            </div>
-            <div className="w-full md:w-64">
-              <Select value={selectedBranch} onValueChange={setSelectedBranch}>
-                <SelectTrigger className="h-12 bg-secondary/20 border-border rounded-xl font-bold">
-                  <SelectValue placeholder="Select Branch" />
-                </SelectTrigger>
-                <SelectContent>
-                  {profile.branch_ids.map(b => (
-                    <SelectItem key={b} value={b} className="font-bold">{b}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-4">
-        <div>
-          <h2 className="text-xl md:text-2xl font-bold tracking-tight">New Sales Entry</h2>
-          <p className="text-xs md:text-sm text-muted-foreground font-medium italic">Entries for {new Date().toLocaleString('default', { month: 'long' })} {new Date().getFullYear()}</p>
+    <div className="space-y-6 max-w-[98vw] mx-auto pb-10">
+      <style dangerouslySetInnerHTML={{ __html: `
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+        input[type=number] {
+          -moz-appearance: textfield;
+        }
+      `}} />
+      <div className="flex justify-between items-center bg-card p-4 rounded-xl shadow-sm border border-border">
+        <div className="flex items-center gap-6">
+          <div>
+            <h2 className="text-xl font-bold font-black uppercase tracking-tight">
+              {view === 'planning' ? 'Target Planning' : 'Actual Sales Entry'}
+            </h2>
+            <p className="text-[10px] text-muted-foreground font-bold">Branch: {selectedBranch}</p>
+          </div>
+          <div className="flex items-center gap-2 bg-secondary/20 p-1.5 rounded-lg border border-border">
+            <span className="text-[10px] font-black uppercase tracking-widest px-2">Year:</span>
+            <Select value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(parseInt(v))}>
+              <SelectTrigger className="w-[100px] h-8 font-black text-xs border-none bg-background shadow-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {years.map(y => <SelectItem key={y} value={y.toString()} className="font-bold">{y}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2 bg-secondary/20 p-1.5 rounded-lg border border-border">
+            <span className="text-[10px] font-black uppercase tracking-widest px-2">Month:</span>
+            <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+              <SelectTrigger className="w-[120px] h-8 font-black text-xs border-none bg-background shadow-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All" className="font-bold">All Months</SelectItem>
+                {MONTHS.map(m => <SelectItem key={m} value={m} className="font-bold">{m}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-        <Button onClick={handleSubmit} disabled={loading} className="w-full md:w-auto bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl px-8 py-6 md:py-4 shadow-xl shadow-primary/20 font-bold">
-          {loading ? <Loader2 className="mr-2 animate-spin" /> : <Save className="mr-2" />}
-          Submit All Data
-        </Button>
+        <div className="flex gap-3">
+          {view === 'planning' && (
+            <Button variant="outline" onClick={addRow} className="font-bold rounded-lg border-primary/20 hover:bg-primary/5 text-primary">
+              <Plus size={16} className="mr-2" />
+              Add Row
+            </Button>
+          )}
+          <Button onClick={handleSubmit} disabled={loading} className="font-bold rounded-lg px-8 bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20">
+            {loading ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Save size={16} className="mr-2" />}
+            {view === 'planning' ? 'Submit Plan' : 'Save Actuals'}
+          </Button>
+        </div>
       </div>
 
-      <div className="space-y-6">
-        {unitGroups.map((group) => (
-          <Card key={group.id} className="border-border shadow-sm rounded-2xl bg-card overflow-hidden border-l-4 border-l-primary">
-            <CardHeader className="bg-secondary/20 border-b border-border py-4 px-4 md:px-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-              <div className="flex items-center gap-3 w-full md:max-w-md">
-                <div className="bg-primary/10 p-2 rounded-lg text-primary shrink-0">
-                  <Database size={18} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <Label className="text-[10px] font-black uppercase tracking-widest text-foreground mb-1 block">Unit Category</Label>
-                  <Select value={group.unitName} onValueChange={(v) => updateUnitName(group.id, v)}>
-                    <SelectTrigger className="bg-card border-border shadow-none h-9 font-bold text-xs truncate">
-                      <SelectValue placeholder="Select Unit..." />
+      <div className="overflow-x-auto rounded-xl border border-border shadow-md bg-card">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="bg-secondary/20 border-b border-border">
+              <th className="p-2 text-left border-r border-border min-w-[40px] font-black uppercase text-[10px] tracking-widest text-foreground h-12">Sr.</th>
+              <th className="p-2 text-left border-r border-border min-w-[220px] font-black uppercase text-[10px] tracking-widest text-foreground h-12">Customer Name</th>
+              <th className="p-2 text-left border-r border-border min-w-[150px] font-black uppercase text-[10px] tracking-widest text-foreground h-12">Unit</th>
+              <th colSpan={displayMonths.length} className="p-1 text-center border-b border-border bg-primary/5 font-black uppercase text-[10px] tracking-widest text-primary h-6">
+                Target & Actual Data (AMT)
+              </th>
+            </tr>
+            <tr className="bg-secondary/10 border-b border-border">
+              <th className="border-r border-border h-6"></th>
+              <th className="border-r border-border h-6"></th>
+              <th className="border-r border-border h-6"></th>
+              {displayShortMonths.map(m => (
+                <th key={m} className="p-1 text-center text-[10px] font-black uppercase tracking-tighter border-r border-border last:border-r-0 min-w-[140px] h-6">
+                  {m}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, idx) => (
+              <tr key={row.id} className="border-b border-border/50 hover:bg-secondary/5 transition-colors h-14">
+                <td className="px-2 py-1 text-center border-r border-border font-bold text-[11px] text-muted-foreground">{idx + 1}</td>
+                <td className="px-1 py-1 border-r border-border">
+                  <Input 
+                    value={row.customerName}
+                    onChange={(e) => updateRow(row.id, 'customerName', e.target.value)}
+                    placeholder="Customer"
+                    disabled={view === 'actuals'}
+                    className="border-none shadow-none focus-visible:ring-1 focus-visible:ring-primary/30 h-10 font-bold text-sm bg-transparent"
+                  />
+                </td>
+                <td className="px-1 py-1 border-r border-border">
+                  <Select 
+                    value={row.unit} 
+                    onValueChange={(v) => updateRow(row.id, 'unit', v)}
+                    disabled={view === 'actuals'}
+                  >
+                    <SelectTrigger className="border-none shadow-none focus:ring-1 focus:ring-primary/30 h-10 font-bold text-xs bg-transparent">
+                      <SelectValue placeholder="Unit" />
                     </SelectTrigger>
                     <SelectContent>
-                      {UNITS.filter(u => !unitGroups.some(g => g.unitName === u && g.id !== group.id)).map(u => (
-                        <SelectItem key={u} value={u} className="font-medium">{u}</SelectItem>
-                      ))}
+                      {UNITS.map(u => <SelectItem key={u} value={u} className="text-xs">{u}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                </div>
-              </div>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={() => removeUnitGroup(group.id)}
-                className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 font-bold text-[10px] uppercase tracking-tighter self-end md:self-auto"
-              >
-                <Trash2 size={14} className="mr-1.5" />
-                Delete Unit
-              </Button>
-            </CardHeader>
-            <CardContent className="p-6">
-              <div className="space-y-4">
-                <div className="grid grid-cols-12 gap-4 px-2 hidden md:grid">
-                  <div className="col-span-5 text-[10px] font-black uppercase tracking-widest text-foreground">Customer Name</div>
-                  <div className="col-span-3 text-[10px] font-black uppercase tracking-widest text-foreground">Plan / Target (Amt)</div>
-                  <div className="col-span-3 text-[10px] font-black uppercase tracking-widest text-foreground">Actual (Amt)</div>
-                  <div className="col-span-1"></div>
-                </div>
-                
-                {group.customers.map((customer) => (
-                  <div key={customer.id} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end p-4 bg-secondary/5 rounded-2xl border border-border/30 group transition-all hover:border-border/60 hover:bg-secondary/10">
-                    <div className="md:col-span-5 space-y-1.5">
-                      <Label className="text-[10px] font-black uppercase tracking-widest text-foreground ml-1">Customer Name</Label>
-                      <Input 
-                        placeholder="" 
-                        value={customer.customerName}
-                        onChange={(e) => updateCustomer(group.id, customer.id, 'customerName', e.target.value)}
-                        className="bg-card border-border shadow-none h-11 font-bold text-sm rounded-xl focus-visible:ring-primary/20"
-                      />
-                    </div>
-                    <div className="md:col-span-3 space-y-1.5">
-                      <Label className="text-[10px] font-black uppercase tracking-widest text-foreground ml-1">Plan / Target (Amt)</Label>
-                      <Input 
-                        type="number" 
-                        placeholder=""
-                        value={customer.targetAmount || ''}
-                        onChange={(e) => updateCustomer(group.id, customer.id, 'targetAmount', parseFloat(e.target.value) || 0)}
-                        className="bg-card border-border shadow-none h-11 font-bold text-sm rounded-xl focus-visible:ring-primary/20"
-                      />
-                    </div>
-                    <div className="md:col-span-3 space-y-1.5">
-                      <Label className="text-[10px] font-black uppercase tracking-widest text-foreground ml-1">Actual (Amt)</Label>
-                      <Input 
-                        type="number" 
-                        placeholder=""
-                        value={customer.actualAmount || ''}
-                        onChange={(e) => updateCustomer(group.id, customer.id, 'actualAmount', parseFloat(e.target.value) || 0)}
-                        className="bg-card border-border shadow-none h-11 font-bold text-sm rounded-xl focus-visible:ring-primary/20"
-                      />
-                    </div>
-                    <div className="md:col-span-1 flex justify-end pb-0.5">
-                      <Button 
+                </td>
+                {displayMonths.map(m => {
+                  const target = row.targets[m] || 0;
+                  const actual = row.actuals[m] || 0;
+                  const diff = actual - target;
+                  
+                  return (
+                    <td key={m} className="px-1 py-1 border-r border-border last:border-r-0">
+                      <div className="flex flex-col gap-1 justify-center h-full">
+                        {view === 'planning' ? (
+                          <Input 
+                            type="number"
+                            value={row.targets[m] || ''}
+                            onChange={(e) => updateMonthlyValue(row.id, m, 'targets', parseFloat(e.target.value) || 0)}
+                            className="h-10 border-border/40 text-center font-bold text-sm px-1 focus-visible:ring-primary/30"
+                          />
+                        ) : (
+                          <div className="space-y-1 py-1">
+                            <div className="flex items-center justify-between text-[10px] font-black px-2 text-muted-foreground bg-secondary/10 rounded-sm py-0.5">
+                              <span>TARGET</span>
+                              <span className="text-foreground">{target.toLocaleString()}</span>
+                            </div>
+                            <div className="flex items-center px-1">
+                              <Input 
+                                type="number"
+                                value={row.actuals[m] || ''}
+                                onChange={(e) => updateMonthlyValue(row.id, m, 'actuals', parseFloat(e.target.value) || 0)}
+                                placeholder="0"
+                                className="h-10 border-none shadow-none text-center font-black text-sm px-1 bg-transparent focus-visible:ring-1 focus-visible:ring-primary/20 flex-1"
+                              />
+                              <div className={`min-w-[50px] text-right text-[10px] font-black leading-none flex flex-col items-end gap-0.5 pr-1 ${diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {actual > 0 ? (
+                                  <>
+                                    <span className="text-[12px]">{diff >= 0 ? '▲' : '▼'}</span>
+                                    <span>{Math.abs(diff).toLocaleString()}</span>
+                                  </>
+                                ) : <span className="text-muted-foreground/30">-</span>}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  );
+                })}
+                {view === 'planning' && rows.length > 1 && (
+                  <td className="p-1">
+                     <Button 
                         variant="ghost" 
                         size="icon" 
-                        onClick={() => removeCustomer(group.id, customer.id)}
-                        className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0 h-10 w-10 rounded-xl"
+                        onClick={() => removeRow(row.id)}
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
                       >
-                        <Trash2 size={16} />
+                        <Trash2 size={12} />
                       </Button>
-                    </div>
-                  </div>
-                ))}
-                
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => addCustomer(group.id)}
-                  className="w-full border-dashed border-border hover:border-primary hover:bg-primary/5 rounded-xl py-4 text-muted-foreground hover:text-primary transition-all font-black text-[10px] uppercase tracking-widest"
-                >
-                  <Plus size={14} className="mr-2" />
-                  Add Another Customer to {group.unitName || 'this Unit'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
-      <Button 
-        variant="outline" 
-        onClick={addUnitGroup} 
-        className="w-full border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 rounded-2xl py-6 text-lg font-bold text-muted-foreground hover:text-primary transition-all"
-      >
-        <Plus size={24} className="mr-3" />
-        Add New Unit Group
-      </Button>
+      {view === 'planning' && (
+        <div className="flex justify-center mt-4">
+           <Button variant="outline" onClick={addRow} className="w-full max-w-sm border-dashed border-2 hover:border-primary hover:bg-primary/5 font-black text-[10px] uppercase tracking-widest h-12 rounded-xl">
+             <Plus size={16} className="mr-2" />
+             Add Another Row
+           </Button>
+        </div>
+      )}
     </div>
   );
 }

@@ -349,15 +349,26 @@ export default function App() {
               Dashboard
             </li>
             <li 
-              onClick={() => { setActiveTab('data-entry'); setIsSidebarOpen(false); }}
+              onClick={() => { setActiveTab('target-planning'); setIsSidebarOpen(false); }}
               className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer transition-all ${
-                activeTab === 'data-entry' 
+                activeTab === 'target-planning' 
                 ? 'bg-sidebar-accent text-sidebar-accent-foreground font-bold shadow-sm' 
                 : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/30 hover:text-sidebar-foreground'
               }`}
             >
               <Database size={18} />
-              Data Entry
+              Target Planning
+            </li>
+            <li 
+              onClick={() => { setActiveTab('actual-entry'); setIsSidebarOpen(false); }}
+              className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer transition-all ${
+                activeTab === 'actual-entry' 
+                ? 'bg-sidebar-accent text-sidebar-accent-foreground font-bold shadow-sm' 
+                : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/30 hover:text-sidebar-foreground'
+              }`}
+            >
+              <Database size={18} />
+              Actual Entry
             </li>
             <li className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground/30 font-medium cursor-not-allowed">
               <Users size={18} />
@@ -400,7 +411,7 @@ export default function App() {
                 referrerPolicy="no-referrer"
               />
               <h1 className="text-base lg:text-2xl font-bold tracking-tight truncate">
-                {activeTab === 'dashboard' ? 'Insights Overview' : 'Sales Data Entry'}
+                {activeTab === 'dashboard' ? 'Insights Overview' : activeTab === 'target-planning' ? 'Target Planning' : 'Monthly Actual Entry'}
               </h1>
             </div>
           </div>
@@ -415,7 +426,8 @@ export default function App() {
           <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
             <TabsList className="hidden">
               <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-              <TabsTrigger value="data-entry">Data Entry</TabsTrigger>
+              <TabsTrigger value="target-planning">Target Planning</TabsTrigger>
+              <TabsTrigger value="actual-entry">Actual Entry</TabsTrigger>
             </TabsList>
 
             <TabsContent value="dashboard" className="mt-0 flex-1 outline-none ring-offset-background">
@@ -423,9 +435,14 @@ export default function App() {
                 <Dashboard profile={profile} />
               </Suspense>
             </TabsContent>
-            <TabsContent value="data-entry" className="mt-0 flex-1 outline-none ring-offset-background">
+            <TabsContent value="target-planning" className="mt-0 flex-1 outline-none ring-offset-background">
               <Suspense fallback={<DataEntrySkeleton />}>
-                <DataEntry profile={profile} />
+                <DataEntry profile={profile} view="planning" />
+              </Suspense>
+            </TabsContent>
+            <TabsContent value="actual-entry" className="mt-0 flex-1 outline-none ring-offset-background">
+              <Suspense fallback={<DataEntrySkeleton />}>
+                <DataEntry profile={profile} view="actuals" />
               </Suspense>
             </TabsContent>
           </Tabs>
@@ -441,11 +458,18 @@ export default function App() {
             <span className="text-[10px] font-bold uppercase tracking-tighter">Dashboard</span>
           </button>
           <button 
-            onClick={() => setActiveTab('data-entry')}
-            className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'data-entry' ? 'text-primary' : 'text-muted-foreground'}`}
+            onClick={() => setActiveTab('target-planning')}
+            className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'target-planning' ? 'text-primary' : 'text-muted-foreground'}`}
           >
-            <Database size={20} className={activeTab === 'data-entry' ? 'fill-primary/20' : ''} />
-            <span className="text-[10px] font-bold uppercase tracking-tighter">Entry</span>
+            <Database size={20} className={activeTab === 'target-planning' ? 'fill-primary/20' : ''} />
+            <span className="text-[10px] font-bold uppercase tracking-tighter">Planning</span>
+          </button>
+          <button 
+            onClick={() => setActiveTab('actual-entry')}
+            className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'actual-entry' ? 'text-primary' : 'text-muted-foreground'}`}
+          >
+            <Database size={20} className={activeTab === 'actual-entry' ? 'fill-primary/20' : ''} />
+            <span className="text-[10px] font-bold uppercase tracking-tighter">Actuals</span>
           </button>
           <button 
             disabled
