@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import { supabase, isSupabaseConfigured } from '@/src/lib/supabase';
 import { Profile } from '@/src/types';
 import Login from '@/src/components/Login';
+import { toast } from 'sonner';
 
 const Dashboard = lazy(() => import('@/src/components/Dashboard'));
 const DataEntry = lazy(() => import('@/src/components/DataEntry'));
@@ -173,7 +174,29 @@ export default function App() {
   }, [fetchProfile]);
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    try {
+      setLoading(true);
+      // Wait for sign out
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      
+      // Force clear state as a safety measure
+      setSession(null);
+      setProfile(null);
+      toast.success('Logged out successfully');
+    } catch (err: any) {
+      console.error('Logout error:', err);
+      toast.error('Logout failed: ' + err.message);
+      
+      // Fallback: clear state anyway if it was a network error or session expiration
+      if (err.message.includes('Fetch') || err.message.includes('network')) {
+        setSession(null);
+        setProfile(null);
+      }
+    } finally {
+      setLoading(false);
+      setIsSidebarOpen(false);
+    }
   };
 
   if (loading) {

@@ -30,7 +30,8 @@ export default function Login() {
         if (!firstName || !lastName) throw new Error('First and Last name are required');
         if (role !== 'Admin' && selectedBranches.length === 0) throw new Error('Please select at least one branch');
 
-        const { error } = await supabase.auth.signUp({ 
+        console.log('Attempting sign up for:', email);
+        const { data, error } = await supabase.auth.signUp({ 
           email, 
           password,
           options: {
@@ -41,10 +42,17 @@ export default function Login() {
             }
           }
         });
+        
         if (error) throw error;
-        toast.success('Sign up successful! Please check your email or sign in.');
-        setIsSignUp(false);
+        
+        if (data.session) {
+          toast.success('Successfully signed up and logged in!');
+        } else {
+          toast.success('Sign up successful! Please check your email for verification.');
+          setIsSignUp(false);
+        }
       } else {
+        console.log('Attempting sign in for:', email);
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         toast.success('Logged in successfully');
