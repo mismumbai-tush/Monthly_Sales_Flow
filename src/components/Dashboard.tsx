@@ -235,19 +235,6 @@ export default function Dashboard({ profile }: DashboardProps) {
           </div>
 
           <div className="space-y-1 order-2 lg:order-none">
-            <Label className="text-[9px] font-black uppercase tracking-widest text-foreground ml-1">Month</Label>
-            <Select value={filters.month} onValueChange={(v) => setFilters(prev => ({ ...prev, month: v }))}>
-              <SelectTrigger className="h-9 w-full lg:w-32 border-muted/50 bg-secondary/5 focus:ring-primary/20 rounded-lg font-bold text-xs">
-                <SelectValue placeholder="Month" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="All">All Months</SelectItem>
-                {MONTHS.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1 order-3 lg:order-none">
             <Label className="text-[9px] font-black uppercase tracking-widest text-foreground ml-1">Year</Label>
             <Select value={filters.year} onValueChange={(v) => setFilters(prev => ({ ...prev, year: v }))}>
               <SelectTrigger className="h-9 w-full lg:w-24 border-muted/50 bg-secondary/5 focus:ring-primary/20 rounded-lg font-bold text-xs">
@@ -256,6 +243,19 @@ export default function Dashboard({ profile }: DashboardProps) {
               <SelectContent>
                 <SelectItem value="All">All Years</SelectItem>
                 {YEARS.map(y => <SelectItem key={y} value={y.toString()}>{y}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1 order-3 lg:order-none">
+            <Label className="text-[9px] font-black uppercase tracking-widest text-foreground ml-1">Month</Label>
+            <Select value={filters.month} onValueChange={(v) => setFilters(prev => ({ ...prev, month: v }))}>
+              <SelectTrigger className="h-9 w-full lg:w-32 border-muted/50 bg-secondary/5 focus:ring-primary/20 rounded-lg font-bold text-xs">
+                <SelectValue placeholder="Month" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All Months</SelectItem>
+                {MONTHS.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -326,7 +326,7 @@ export default function Dashboard({ profile }: DashboardProps) {
         </Card>
 
         <Card className="border-border shadow-sm rounded-xl flex flex-col justify-center py-3 px-4 bg-card border-l-4 border-l-emerald-500 h-24">
-          <p className="text-[10px] font-black uppercase tracking-widest text-foreground mb-1">Total Sales</p>
+          <p className="text-[10px] font-black uppercase tracking-widest text-foreground mb-1">Total Actual</p>
           <p className="text-xl font-bold tracking-tight text-emerald-600 leading-[1.1]">₹{stats.totalActual.toLocaleString()}</p>
           <div className="text-[10px] font-bold mt-1 flex items-center gap-1">
             {stats.totalTarget > 0 ? (

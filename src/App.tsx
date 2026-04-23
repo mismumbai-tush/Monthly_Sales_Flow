@@ -74,7 +74,7 @@ export default function App() {
         .maybeSingle();
       
       const profileTimeout = new Promise<{data: null, error: Error}>((_, reject) => 
-        setTimeout(() => reject(new Error('Profile fetch timed out')), 10000)
+        setTimeout(() => reject(new Error('Profile fetch timed out')), 30000)
       );
 
       const { data, error } = await (Promise.race([profilePromise, profileTimeout]) as any);
