@@ -280,7 +280,7 @@ export default function DataEntry({ profile, view }: DataEntryProps) {
   };
 
   return (
-    <div className="space-y-6 max-w-[98vw] mx-auto pb-10 overflow-hidden">
+    <div className="space-y-6 w-full mx-auto pb-10">
       <style dangerouslySetInnerHTML={{ __html: `
         input::-webkit-outer-spin-button,
         input::-webkit-inner-spin-button {
@@ -306,80 +306,69 @@ export default function DataEntry({ profile, view }: DataEntryProps) {
         .scale-in-center {
           animation: scaleIn 0.2s ease-out forwards;
         }
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: hsl(var(--border));
-          border-radius: 10px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: hsl(var(--muted-foreground)/0.3);
-        }
       `}} />
-      <div className="flex flex-wrap lg:flex-nowrap justify-between items-center gap-4 bg-card p-3 rounded-xl shadow-sm border border-border">
-        <div className="flex flex-nowrap items-center gap-3 overflow-x-auto custom-scrollbar pb-1 lg:pb-0">
-          <div className="min-w-max pr-2 mr-2 border-r border-border">
-            <h2 className="text-sm font-black uppercase tracking-tight leading-none text-primary">
+      <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-4 bg-card p-2 md:p-3 rounded-xl shadow-sm border border-border">
+        <div className="flex items-center gap-2 overflow-x-auto flex-nowrap custom-scrollbar pb-2 lg:pb-0 scroll-smooth">
+          <div className="min-w-max pr-3 mr-1 border-r border-border flex flex-col justify-center">
+            <h2 className="text-[10px] md:text-xs lg:text-sm font-black uppercase tracking-tight leading-none text-primary whitespace-nowrap">
               {view === 'planning' ? 'Target Planning' : 'Actual Sales Entry'}
             </h2>
-            <p className="text-[9px] text-muted-foreground font-bold uppercase tracking-tighter">Branch: {selectedBranch}</p>
+            <p className="text-[8px] md:text-[9px] text-muted-foreground font-bold uppercase tracking-tighter whitespace-nowrap">Branch: {selectedBranch}</p>
           </div>
-          <div className="flex items-center gap-1.5 bg-secondary/20 h-9 px-2 rounded-lg border border-border">
-            <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Year</span>
-            <Select value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(parseInt(v))}>
-              <SelectTrigger className="w-[80px] h-7 font-black text-xs border-none bg-background shadow-sm rounded-md">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {years.map(y => <SelectItem key={y} value={y.toString()} className="font-bold">{y}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex items-center gap-1.5 bg-secondary/20 h-9 px-2 rounded-lg border border-border">
-            <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Month</span>
-            <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-              <SelectTrigger className="w-[110px] h-7 font-black text-xs border-none bg-background shadow-sm rounded-md">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="All" className="font-bold">All Months</SelectItem>
-                {MONTHS.map(m => <SelectItem key={m} value={m} className="font-bold">{m}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex items-center gap-1.5 bg-secondary/20 h-9 px-2 rounded-lg border border-border">
-            <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Unit</span>
-            <Select value={selectedUnit} onValueChange={setSelectedUnit}>
-              <SelectTrigger className="w-[110px] h-7 font-black text-xs border-none bg-background shadow-sm rounded-md">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="All" className="font-bold">All Units</SelectItem>
-                {UNITS.map(u => <SelectItem key={u} value={u} className="font-bold">{u}</SelectItem>)}
-              </SelectContent>
-            </Select>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1 bg-secondary/20 h-8 px-2 rounded-lg border border-border">
+              <span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground">Yr</span>
+              <Select value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(parseInt(v))}>
+                <SelectTrigger className="w-[60px] md:w-[80px] h-6 font-black text-[10px] border-none bg-background shadow-sm rounded-md">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {years.map(y => <SelectItem key={y} value={y.toString()} className="font-bold text-[10px]">{y}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-1 bg-secondary/20 h-8 px-2 rounded-lg border border-border">
+              <span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground">Mo</span>
+              <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                <SelectTrigger className="w-[90px] md:w-[110px] h-6 font-black text-[10px] border-none bg-background shadow-sm rounded-md">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All" className="font-bold text-[10px]">All</SelectItem>
+                  {MONTHS.map(m => <SelectItem key={m} value={m} className="font-bold text-[10px]">{m}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-1 bg-secondary/20 h-8 px-2 rounded-lg border border-border">
+              <span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground">Ut</span>
+              <Select value={selectedUnit} onValueChange={setSelectedUnit}>
+                <SelectTrigger className="w-[90px] md:w-[110px] h-6 font-black text-[10px] border-none bg-background shadow-sm rounded-md">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All" className="font-bold text-[10px]">All</SelectItem>
+                  {UNITS.map(u => <SelectItem key={u} value={u} className="font-bold text-[10px]">{u}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
-        <div className="flex gap-3 w-full md:w-auto justify-end">
+        <div className="flex gap-2 w-full lg:w-auto justify-end">
           {view === 'planning' && (
-            <>
-              <Button variant="outline" size="sm" onClick={() => setIsBulkOpen(true)} className="font-bold rounded-lg border-primary/20 hover:bg-primary/5 text-primary text-xs h-9">
-                <ClipboardList size={14} className="mr-2" />
-                Multi-Unit Bulk Plan
+            <div className="flex gap-2 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0 custom-scrollbar">
+              <Button variant="outline" size="sm" onClick={() => setIsBulkOpen(true)} className="shrink-0 font-bold rounded-lg border-primary/20 hover:bg-primary/5 text-primary text-[10px] h-8 px-2 md:px-3">
+                <ClipboardList size={12} className="mr-1.5" />
+                Bulk
               </Button>
-              <Button variant="outline" size="sm" onClick={addRow} className="font-bold rounded-lg border-primary/20 hover:bg-primary/5 text-primary text-xs h-9">
-                <Plus size={14} className="mr-2" />
-                Add Row
+              <Button variant="outline" size="sm" onClick={addRow} className="shrink-0 font-bold rounded-lg border-primary/20 hover:bg-primary/5 text-primary text-[10px] h-8 px-2 md:px-3">
+                <Plus size={12} className="mr-1.5" />
+                Row
               </Button>
-            </>
+            </div>
           )}
-          <Button onClick={handleSubmit} size="sm" disabled={loading} className="font-bold rounded-lg px-6 bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 text-xs h-9">
-            {loading ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Save size={14} className="mr-2" />}
-            {view === 'planning' ? 'Submit Plan' : 'Save Actuals'}
+          <Button onClick={handleSubmit} size="sm" disabled={loading} className="font-black rounded-lg px-4 md:px-6 bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 text-[10px] h-8">
+            {loading ? <Loader2 size={12} className="mr-1.5 animate-spin" /> : <Save size={12} className="mr-1.5" />}
+            {view === 'planning' ? 'Submit' : 'Save'}
           </Button>
         </div>
       </div>
@@ -447,21 +436,21 @@ export default function DataEntry({ profile, view }: DataEntryProps) {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-border shadow-md bg-card relative">
-        <table className="w-full border-separate border-spacing-0">
+      <div className="overflow-x-auto w-full rounded-xl border border-border shadow-md bg-card relative custom-scrollbar">
+        <table className="w-full border-separate border-spacing-0 table-auto min-w-max lg:min-w-full">
           <thead>
             <tr className="bg-secondary">
-              <th className={`${isAllMonths ? 'sticky left-0 z-30' : ''} bg-secondary p-2 text-left border-r border-b border-border min-w-[40px] font-black uppercase text-[10px] tracking-widest text-foreground h-12 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>Sr.</th>
-              <th className={`${isAllMonths ? 'sticky left-[40px] z-30' : ''} bg-secondary p-2 text-left border-r border-b border-border min-w-[220px] font-black uppercase text-[10px] tracking-widest text-foreground h-12 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>Customer Name</th>
-              <th className={`${isAllMonths ? 'sticky left-[260px] z-30' : ''} bg-secondary p-2 text-left border-r border-b border-border min-w-[150px] font-black uppercase text-[10px] tracking-widest text-foreground h-12 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>Unit</th>
-              <th colSpan={displayMonths.length} className="p-1 text-center border-b border-border bg-primary/5 font-black uppercase text-[10px] tracking-widest text-primary h-6 z-10">
-                Target & Actual Data (AMT)
+              <th className={`${isAllMonths ? 'sticky lg:sticky left-0 z-30' : ''} bg-secondary p-1.5 text-left border-r border-b border-border min-w-[30px] md:min-w-[40px] font-black uppercase text-[9px] tracking-widest text-foreground h-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>Sr.</th>
+              <th className={`${isAllMonths ? 'sticky lg:sticky left-[30px] md:left-[40px] z-30' : ''} bg-secondary p-1.5 text-left border-r border-b border-border min-w-[150px] md:min-w-[220px] font-black uppercase text-[9px] tracking-widest text-foreground h-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>Customer Name</th>
+              <th className={`${isAllMonths ? 'hidden lg:table-cell lg:sticky lg:left-[260px] z-30' : ''} bg-secondary p-1.5 text-left border-r border-b border-border min-w-[120px] md:min-w-[150px] font-black uppercase text-[9px] tracking-widest text-foreground h-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>Unit</th>
+              <th colSpan={displayMonths.length} className="p-1 text-center border-b border-border bg-primary/5 font-black uppercase text-[9px] tracking-widest text-primary h-10 z-10">
+                Target & Actual (AMT)
               </th>
             </tr>
             <tr className="bg-secondary/80 backdrop-blur-sm">
-              <th className={`${isAllMonths ? 'sticky left-0 z-30' : ''} bg-secondary border-r border-b border-border h-6 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}></th>
-              <th className={`${isAllMonths ? 'sticky left-[40px] z-30' : ''} bg-secondary border-r border-b border-border h-6 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}></th>
-              <th className={`${isAllMonths ? 'sticky left-[260px] z-30' : ''} bg-secondary border-r border-b border-border h-6 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}></th>
+              <th className={`${isAllMonths ? 'sticky lg:sticky left-0 z-30' : ''} bg-secondary border-r border-b border-border h-6 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}></th>
+              <th className={`${isAllMonths ? 'sticky lg:sticky left-[30px] md:left-[40px] z-30' : ''} bg-secondary border-r border-b border-border h-6 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}></th>
+              <th className={`${isAllMonths ? 'hidden lg:table-cell lg:sticky lg:left-[260px] z-30' : ''} bg-secondary border-r border-b border-border h-6 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}></th>
               {displayShortMonths.map(m => (
                 <th key={m} className={`p-1 text-center text-[10px] font-black uppercase tracking-tighter border-r border-b border-border last:border-r-0 ${isAllMonths ? 'min-w-[160px]' : 'min-w-[200px]'} h-6 z-10 bg-secondary/50`}>
                   {m}
@@ -474,8 +463,8 @@ export default function DataEntry({ profile, view }: DataEntryProps) {
               .filter(r => selectedUnit === 'All' || r.unit === selectedUnit)
               .map((row, idx) => (
               <tr key={row.id} className="hover:bg-secondary/5 transition-colors h-12 group">
-                <td className={`${isAllMonths ? 'sticky left-0 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''} bg-card group-hover:bg-card px-2 py-1 text-center border-r border-b border-border font-bold text-[11px] text-muted-foreground transition-all`}>{idx + 1}</td>
-                <td className={`${isAllMonths ? 'sticky left-[40px] z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''} bg-card group-hover:bg-card px-1 py-1 border-r border-b border-border transition-all`}>
+                <td className={`${isAllMonths ? 'sticky lg:sticky left-0 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''} bg-card group-hover:bg-card px-2 py-1 text-center border-r border-b border-border font-bold text-[11px] text-muted-foreground transition-all min-w-[30px] md:min-w-[40px]`}>{idx + 1}</td>
+                <td className={`${isAllMonths ? 'sticky lg:sticky left-[30px] md:left-[40px] z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''} bg-card group-hover:bg-card px-1 py-1 border-r border-b border-border transition-all min-w-[150px] md:min-w-[220px]`}>
                   <Input 
                     value={row.customerName}
                     onChange={(e) => updateRow(row.id, 'customerName', e.target.value)}
@@ -483,8 +472,14 @@ export default function DataEntry({ profile, view }: DataEntryProps) {
                     disabled={view === 'actuals'}
                     className="border-none shadow-none focus-visible:ring-0 h-10 font-black text-xs bg-transparent"
                   />
+                  {/* On mobile, show unit here if it's hidden from columns */}
+                  <div className="lg:hidden px-3 pb-1 -mt-2">
+                    <span className="text-[8px] font-black uppercase text-primary/60 bg-primary/5 px-1.5 py-0.5 rounded border border-primary/10">
+                      Unit: {row.unit || 'Not Set'}
+                    </span>
+                  </div>
                 </td>
-                <td className={`${isAllMonths ? 'sticky left-[260px] z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''} bg-card group-hover:bg-card px-1 py-1 border-r border-b border-border transition-all`}>
+                <td className={`${isAllMonths ? 'hidden lg:table-cell lg:sticky lg:left-[260px] z-20' : ''} bg-card group-hover:bg-card px-1 py-1 border-r border-b border-border transition-all min-w-[120px] md:min-w-[150px]`}>
                   <Select 
                     value={row.unit} 
                     onValueChange={(v) => updateRow(row.id, 'unit', v)}
@@ -586,7 +581,10 @@ export default function DataEntry({ profile, view }: DataEntryProps) {
           </tbody>
           <tfoot className="sticky bottom-0 z-40 bg-muted/90 backdrop-blur-md">
             <tr className="h-12 border-t-2 border-border shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
-              <td colSpan={3} className={`${isAllMonths ? 'sticky left-0 z-50' : ''} bg-muted px-4 py-2 text-right border-r border-border font-black uppercase text-[10px] tracking-widest text-foreground shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>
+              <td colSpan={2} className={`${isAllMonths ? 'sticky lg:sticky left-0 z-50 min-w-[180px]' : ''} lg:hidden bg-muted px-4 py-2 text-right border-r border-border font-black uppercase text-[10px] tracking-widest text-foreground shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>
+                Total
+              </td>
+              <td colSpan={3} className={`${isAllMonths ? 'sticky lg:sticky left-0 z-50 lg:min-w-[410px]' : ''} hidden lg:table-cell bg-muted px-4 py-2 text-right border-r border-border font-black uppercase text-[10px] tracking-widest text-foreground shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>
                 Grand Total
               </td>
               {displayMonths.map(m => {

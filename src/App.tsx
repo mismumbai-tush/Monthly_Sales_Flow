@@ -309,7 +309,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-background font-sans overflow-hidden relative">
+    <div className="flex h-screen h-[100dvh] bg-background font-sans overflow-hidden relative">
       {/* Mobile Sidebar Overlay */}
       {isSidebarOpen && (
         <div 
@@ -321,13 +321,13 @@ export default function App() {
       {/* Sidebar - Fixed to ensure it doesn't push main content on mobile */}
       <aside className={`
         fixed inset-y-0 left-0 z-50 w-64 bg-sidebar text-sidebar-foreground flex flex-col p-6 shrink-0 transition-transform duration-300 ease-in-out
-        lg:translate-x-0 lg:static lg:inset-auto
+        lg:translate-x-0 lg:static lg:inset-auto h-full
         ${isSidebarOpen ? 'translate-x-0 shadow-2xl shadow-black/50' : '-translate-x-full'}
       `}>
         <div className="mb-10 flex flex-col items-start gap-6 w-full">
           <div className="flex items-center justify-between w-full lg:hidden">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center p-1">
+              <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center p-1.5 shadow-md">
                 <img 
                   src="https://www.ginzalimited.com/cdn/shop/files/Ginza_logo.png" 
                   alt="Ginza" 
@@ -343,7 +343,7 @@ export default function App() {
           </div>
           
           <div className="hidden lg:flex flex-col gap-4">
-            <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center p-2.5 shadow-xl shadow-black/30 border border-white/10 group overflow-hidden relative">
+            <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center p-2 shadow-xl shadow-black/20 border border-white/10 group overflow-hidden relative">
               <img 
                 src="https://www.ginzalimited.com/cdn/shop/files/Ginza_logo.png" 
                 alt="Ginza Logo" 
@@ -415,7 +415,7 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 h-full overflow-hidden pb-16 lg:pb-0">
+      <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden pb-16 lg:pb-0">
         <header className="h-16 lg:h-20 px-4 lg:px-8 flex items-center justify-between shrink-0 border-b border-border/50 bg-background/95 backdrop-blur-md sticky top-0 z-30">
           <div className="flex items-center gap-2 md:gap-4 overflow-hidden">
             <Button 
@@ -427,12 +427,14 @@ export default function App() {
               <Menu size={20} />
             </Button>
             <div className="flex items-center gap-3">
-              <img 
-                src="https://www.ginzalimited.com/cdn/shop/files/Ginza_logo.png" 
-                alt="Ginza" 
-                className="h-6 w-auto object-contain brightness-0 lg:hidden"
-                referrerPolicy="no-referrer"
-              />
+              <div className="lg:hidden bg-white px-2 py-1 rounded-md shadow-sm border border-border/10">
+                <img 
+                  src="https://www.ginzalimited.com/cdn/shop/files/Ginza_logo.png" 
+                  alt="Ginza" 
+                  className="h-7 w-auto object-contain"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
               <h1 className="text-base lg:text-2xl font-bold tracking-tight truncate">
                 {activeTab === 'dashboard' ? 'Insights Overview' : activeTab === 'target-planning' ? 'Target Planning' : 'Monthly Actual Entry'}
               </h1>
@@ -445,7 +447,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className="flex-1 overflow-x-hidden overflow-y-auto px-4 lg:px-8 pb-10 pt-4 custom-scrollbar">
+        <div className="flex-1 overflow-x-auto overflow-y-auto px-4 lg:px-8 pb-24 lg:pb-10 pt-4 custom-scrollbar scroll-smooth">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
             <TabsList className="hidden">
               <TabsTrigger value="dashboard">Dashboard</TabsTrigger>

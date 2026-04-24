@@ -207,133 +207,139 @@ export default function Dashboard({ profile }: DashboardProps) {
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       {/* Filters */}
-      <div className="space-y-4">
-        <div className="flex flex-col gap-1 px-1">
+      <div className="space-y-3">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 px-1">
           <div className="flex items-center gap-2">
-            <Filter size={16} className="text-primary" />
-            <h2 className="text-lg font-black tracking-tight text-foreground">Sales Performance Filters</h2>
+            <Filter size={14} className="text-primary" />
+            <h2 className="text-base font-black tracking-tight text-foreground uppercase">Analysis Filters</h2>
           </div>
-          <div className="flex flex-col md:flex-row items-start md:items-center gap-2">
-            <div className="text-[10px] lg:text-xs text-muted-foreground font-extrabold uppercase tracking-widest bg-secondary/80 px-2 lg:px-3 py-1 rounded-full whitespace-nowrap border border-border">
-              Last View: {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-            </div>
+          <div className="text-[9px] text-muted-foreground font-extrabold uppercase tracking-widest bg-secondary/80 px-2 py-0.5 rounded-full border border-border">
+            Refreshed: {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
           </div>
         </div>
         
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap gap-3 items-end bg-card p-3 rounded-2xl border border-border shadow-sm">
-          <div className="flex-1 min-w-[150px] space-y-1 order-1 lg:order-none">
-            <Label className="text-[9px] font-black uppercase tracking-widest text-foreground ml-1">Search Customer</Label>
+        <div className="flex flex-col lg:flex-row lg:flex-wrap gap-2 lg:gap-3 items-stretch lg:items-end bg-card p-2 lg:p-3 rounded-2xl border border-border shadow-sm">
+          <div className="w-full lg:flex-1 min-w-[150px] space-y-1">
+            <Label className="text-[8px] font-black uppercase tracking-widest text-muted-foreground ml-1">Search Customer</Label>
             <div className="relative group">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground group-focus-within:text-primary transition-colors" />
               <Input 
                 placeholder="Search..." 
-                className="pl-8 h-9 border-muted/50 bg-secondary/5 focus-visible:ring-primary/20 rounded-lg font-bold text-xs"
+                className="pl-8 h-8 border-muted/30 bg-secondary/5 focus-visible:ring-primary/20 rounded-lg font-bold text-[11px]"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
           </div>
 
-          <div className="space-y-1 order-2 lg:order-none">
-            <Label className="text-[9px] font-black uppercase tracking-widest text-foreground ml-1">Year</Label>
-            <Select value={filters.year} onValueChange={(v) => setFilters(prev => ({ ...prev, year: v }))}>
-              <SelectTrigger className="h-9 w-full lg:w-24 border-muted/50 bg-secondary/5 focus:ring-primary/20 rounded-lg font-bold text-xs">
-                <SelectValue placeholder="Year" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="All">All Years</SelectItem>
-                {YEARS.map(y => <SelectItem key={y} value={y.toString()}>{y}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:flex lg:flex-wrap gap-2 lg:gap-3 w-full lg:w-auto">
+            <div className="space-y-1">
+              <Label className="text-[8px] font-black uppercase tracking-widest text-muted-foreground ml-1">Year</Label>
+              <Select value={filters.year} onValueChange={(v) => setFilters(prev => ({ ...prev, year: v }))}>
+                <SelectTrigger className="h-8 w-full lg:w-24 border-muted/30 bg-secondary/5 focus:ring-primary/20 rounded-lg font-bold text-[11px]">
+                  <SelectValue placeholder="Year" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All">All Years</SelectItem>
+                  {YEARS.map(y => <SelectItem key={y} value={y.toString()}>{y}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
 
-          <div className="space-y-1 order-3 lg:order-none">
-            <Label className="text-[9px] font-black uppercase tracking-widest text-foreground ml-1">Month</Label>
-            <Select value={filters.month} onValueChange={(v) => setFilters(prev => ({ ...prev, month: v }))}>
-              <SelectTrigger className="h-9 w-full lg:w-32 border-muted/50 bg-secondary/5 focus:ring-primary/20 rounded-lg font-bold text-xs">
-                <SelectValue placeholder="Month" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="All">All Months</SelectItem>
-                {MONTHS.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
+            <div className="space-y-1">
+              <Label className="text-[8px] font-black uppercase tracking-widest text-muted-foreground ml-1">Month</Label>
+              <Select value={filters.month} onValueChange={(v) => setFilters(prev => ({ ...prev, month: v }))}>
+                <SelectTrigger className="h-8 w-full lg:w-32 border-muted/30 bg-secondary/5 focus:ring-primary/20 rounded-lg font-bold text-[11px]">
+                  <SelectValue placeholder="Month" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All">All Months</SelectItem>
+                  {MONTHS.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
 
-          <div className="space-y-1 order-4 lg:order-none">
-            <Label className="text-[9px] font-black uppercase tracking-widest text-foreground ml-1">Unit</Label>
-            <Select value={filters.unit} onValueChange={(v) => setFilters(prev => ({ ...prev, unit: v }))}>
-              <SelectTrigger className="h-9 w-full lg:w-32 border-muted/50 bg-secondary/5 focus:ring-primary/20 rounded-lg font-bold text-xs">
-                <SelectValue placeholder="Unit" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="All">All Units</SelectItem>
-                {UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
+            <div className="space-y-1">
+              <Label className="text-[8px] font-black uppercase tracking-widest text-muted-foreground ml-1">Unit</Label>
+              <Select value={filters.unit} onValueChange={(v) => setFilters(prev => ({ ...prev, unit: v }))}>
+                <SelectTrigger className="h-8 w-full lg:w-32 border-muted/30 bg-secondary/5 focus:ring-primary/20 rounded-lg font-bold text-[11px]">
+                  <SelectValue placeholder="Unit" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All">All Units</SelectItem>
+                  {UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
 
-          <div className="space-y-1 order-5 lg:order-none">
-            <Label className="text-[9px] font-black uppercase tracking-widest text-foreground ml-1">Branch</Label>
-            <Select value={filters.branch} onValueChange={(v) => {
-              setFilters(prev => ({ ...prev, branch: v, salesperson: 'All' }));
-            }}>
-              <SelectTrigger className="h-9 w-full lg:w-32 border-muted/50 bg-secondary/5 focus:ring-primary/20 rounded-lg font-bold text-xs">
-                <SelectValue placeholder="Branch" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="All">All Branches</SelectItem>
-                {BRANCHES.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
+            <div className="space-y-1">
+              <Label className="text-[8px] font-black uppercase tracking-widest text-muted-foreground ml-1">Branch</Label>
+              <Select value={filters.branch} onValueChange={(v) => {
+                setFilters(prev => ({ ...prev, branch: v, salesperson: 'All' }));
+              }}>
+                <SelectTrigger className="h-8 w-full lg:w-32 border-muted/30 bg-secondary/5 focus:ring-primary/20 rounded-lg font-bold text-[11px]">
+                  <SelectValue placeholder="Branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All">All Branches</SelectItem>
+                  {BRANCHES.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
 
-          <div className="space-y-1 order-6 lg:order-none">
-            <Label className="text-[9px] font-black uppercase tracking-widest text-foreground ml-1">Salesperson</Label>
-            <Select value={filters.salesperson} onValueChange={(v) => setFilters(prev => ({ ...prev, salesperson: v }))}>
-              <SelectTrigger className="h-9 w-full lg:w-36 border-muted/50 bg-secondary/5 focus:ring-primary/20 rounded-lg font-bold text-xs">
-                <SelectValue placeholder="Salesperson" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="All">All Persons</SelectItem>
-                {availableSalespersons.map(s => (
-                  <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="space-y-1 sm:col-span-2 lg:col-span-1">
+              <Label className="text-[8px] font-black uppercase tracking-widest text-muted-foreground ml-1">Salesperson</Label>
+              <Select value={filters.salesperson} onValueChange={(v) => setFilters(prev => ({ ...prev, salesperson: v }))}>
+                <SelectTrigger className="h-8 w-full lg:w-36 border-muted/30 bg-secondary/5 focus:ring-primary/20 rounded-lg font-bold text-[11px]">
+                  <SelectValue placeholder="Salesperson" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All">All Persons</SelectItem>
+                  {availableSalespersons.map(s => (
+                    <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Bento Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <Card className="border-border shadow-sm rounded-xl flex flex-col justify-center py-3 px-4 bg-card border-l-4 border-l-blue-500 h-24">
-          <p className="text-[10px] font-black uppercase tracking-widest text-foreground mb-1">Unique Customers</p>
-          <p className="text-xl font-bold tracking-tight leading-[1.1]">{stats.totalCustomers}</p>
-          <div className="text-[10px] text-blue-500 font-medium mt-1 flex items-center gap-1">
-            <Users size={10} />
-            Active Base
+        <Card className="border-border shadow-sm rounded-xl flex flex-col justify-center py-2 px-4 bg-card border-l-4 border-l-blue-500 min-h-[70px]">
+          <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground leading-none mb-0.5">Unique Customers</p>
+          <div className="flex items-baseline gap-2">
+            <p className="text-xl font-black tracking-tighter leading-none">{stats.totalCustomers}</p>
+            <div className="text-[9px] text-blue-500 font-bold flex items-center gap-0.5">
+              <Users size={8} />
+              Base
+            </div>
           </div>
         </Card>
 
-        <Card className="border-border shadow-sm rounded-xl flex flex-col justify-center py-3 px-4 bg-card border-l-4 border-l-amber-500 h-24">
-          <p className="text-[10px] font-black uppercase tracking-widest text-foreground mb-1">Total Target</p>
-          <p className="text-xl font-bold tracking-tight leading-[1.1]">₹{stats.totalTarget.toLocaleString()}</p>
-          <div className="text-[10px] text-muted-foreground font-medium mt-1 flex items-center gap-1">
-            <Target size={10} />
-            Budgeted
+        <Card className="border-border shadow-sm rounded-xl flex flex-col justify-center py-2 px-4 bg-card border-l-4 border-l-amber-500 min-h-[70px]">
+          <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground leading-none mb-0.5">Total Target</p>
+          <div className="flex items-baseline gap-2">
+            <p className="text-xl font-black tracking-tighter leading-none">₹{stats.totalTarget.toLocaleString()}</p>
+            <div className="text-[9px] text-amber-500 font-bold flex items-center gap-0.5">
+              <Target size={8} />
+              Goal
+            </div>
           </div>
         </Card>
 
-        <Card className="border-border shadow-sm rounded-xl flex flex-col justify-center py-3 px-4 bg-card border-l-4 border-l-emerald-500 h-24">
-          <p className="text-[10px] font-black uppercase tracking-widest text-foreground mb-1">Total Actual</p>
-          <p className="text-xl font-bold tracking-tight text-emerald-600 leading-[1.1]">₹{stats.totalActual.toLocaleString()}</p>
-          <div className="text-[10px] font-bold mt-1 flex items-center gap-1">
-            {stats.totalTarget > 0 ? (
-              <span className={stats.totalActual >= stats.totalTarget ? "text-emerald-500" : "text-amber-500"}>
-                {Math.round((stats.totalActual / stats.totalTarget) * 100)}% Achievement
-              </span>
-            ) : <span className="text-muted-foreground">0% Achievement</span>}
+        <Card className="border-border shadow-sm rounded-xl flex flex-col justify-center py-2 px-4 bg-card border-l-4 border-l-emerald-500 min-h-[70px]">
+          <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground leading-none mb-0.5">Total Actual</p>
+          <div className="flex items-baseline gap-2">
+            <p className="text-xl font-black tracking-tighter text-emerald-600 leading-none">₹{stats.totalActual.toLocaleString()}</p>
+            <div className="text-[9px] font-black ml-auto">
+              {stats.totalTarget > 0 ? (
+                <span className={stats.totalActual >= stats.totalTarget ? "text-emerald-500" : "text-amber-500"}>
+                  {Math.round((stats.totalActual / stats.totalTarget) * 100)}%
+                </span>
+              ) : <span className="text-muted-foreground opacity-30">0%</span>}
+            </div>
           </div>
         </Card>
       </div>
