@@ -291,7 +291,9 @@ export default function Dashboard({ profile }: DashboardProps) {
               <Label className="text-[8px] font-black uppercase tracking-widest text-muted-foreground ml-1">Employee Name</Label>
               <Select value={filters.salesperson} onValueChange={(v) => setFilters(prev => ({ ...prev, salesperson: v }))}>
                 <SelectTrigger className="h-8 w-full lg:w-36 border-muted/30 bg-secondary/5 focus:ring-primary/20 rounded-lg font-bold text-[11px]">
-                  <SelectValue placeholder="Employee" />
+                  <SelectValue placeholder="Employee Name">
+                    {filters.salesperson === 'All' ? 'All Employees' : (salespersons.find(s => s.id === filters.salesperson)?.full_name || 'Select Employee')}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="All">All Employees</SelectItem>

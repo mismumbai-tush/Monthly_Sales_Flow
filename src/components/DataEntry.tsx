@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Plus, Save, Loader2, Trash2, ClipboardList, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { UNITS } from '@/src/constants';
+import { UNITS, BRANCHES } from '@/src/constants';
 import { Label } from '@/components/ui/label';
 
 interface DataEntryProps {
@@ -47,17 +47,25 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
         return;
       }
       try {
-        const { data } = await supabase
+        console.log(`FETCHING EMPLOYEES for Branch: ${selectedBranch}`);
+        const { data, error } = await supabase
           .from('profiles')
           .select('*')
-          .in('role', ['Sales Person', 'Branch Head'])
-          .contains('branch_ids', [selectedBranch]);
+          .in('role', ['Sales Person', 'Branch Head']);
+
+        if (error) throw error;
+
+        // Filter manually to ensure accuracy with array fields
+        let branchEmployees = (data || []).filter(p => 
+          p.branch_ids && Array.isArray(p.branch_ids) && p.branch_ids.includes(selectedBranch)
+        );
+
+        // Sort by name
+        branchEmployees.sort((a, b) => a.full_name.localeCompare(b.full_name));
         
         // Ensure the currently selected salesperson is in the list
-        let updatedList = data || [];
+        let updatedList = [...branchEmployees];
         
-        // If we have an initial salesperson ID (drill down) or a selected ID, 
-        // and it's NOT in the list, fetch it specifically
         const targetId = initialSalespersonId || selectedSalesperson;
         if (targetId && targetId !== 'All' && !updatedList.find(p => p.id === targetId)) {
           const { data: sp } = await supabase
@@ -66,7 +74,7 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
             .eq('id', targetId)
             .maybeSingle();
           if (sp) {
-            updatedList = [...updatedList, sp];
+            updatedList = [sp, ...updatedList];
           }
         }
         
@@ -138,7 +146,7 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
     
     let branches: string[] = [];
     if (profile.role === 'Admin') {
-      branches = ['Ahmedabad', 'Bangalore', 'Delhi', 'Jaipur', 'Kolkata', 'Ludhiana', 'Mumbai', 'Surat', 'Tirupur', 'Ulhasnagar'];
+      branches = BRANCHES;
     } else {
       branches = profile.branch_ids || [];
     }
@@ -417,12 +425,27 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
             <p className="text-[8px] md:text-[9px] text-muted-foreground font-bold uppercase tracking-tighter whitespace-nowrap">Branch Name: {selectedBranch}</p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1 bg-secondary/20 h-8 px-2 rounded-lg border border-border">
+              <span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground mr-1">Branch Name</span>
+              <Select value={selectedBranch || ''} onValueChange={setSelectedBranch}>
+                <SelectTrigger className="w-[110px] md:w-[130px] h-6 font-black text-[10px] border-none bg-background shadow-sm rounded-md">
+                  <SelectValue placeholder="Branch Name" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableBranches.map(b => (
+                    <SelectItem key={b} value={b} className="font-bold text-[10px]">{b}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             {(profile?.role === 'Admin' || profile?.role === 'Branch Head') && (
               <div className="flex items-center gap-1 bg-primary/5 h-8 px-2 rounded-lg border border-primary/20">
                 <span className="text-[8px] font-black uppercase tracking-widest text-primary mr-1">Employee Name</span>
                 <Select value={selectedSalesperson} onValueChange={setSelectedSalesperson}>
                   <SelectTrigger className="w-[130px] md:w-[160px] h-6 font-black text-[10px] border-none bg-background shadow-sm rounded-md text-primary">
-                    <SelectValue placeholder="Select Employee" />
+                    <SelectValue placeholder="Select Employee">
+                      {selectedSalesperson === 'All' ? 'All Employees' : (salespeople.find(p => p.id === selectedSalesperson)?.full_name || 'Select Employee')}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="All" className="font-bold text-[10px]">All Employees</SelectItem>
@@ -433,19 +456,6 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
                 </Select>
               </div>
             )}
-            <div className="flex items-center gap-1 bg-secondary/20 h-8 px-2 rounded-lg border border-border">
-              <span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground mr-1">Branch Name</span>
-              <Select value={selectedBranch || ''} onValueChange={setSelectedBranch}>
-                <SelectTrigger className="w-[110px] md:w-[130px] h-6 font-black text-[10px] border-none bg-background shadow-sm rounded-md">
-                  <SelectValue placeholder="Select Branch" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableBranches.map(b => (
-                    <SelectItem key={b} value={b} className="font-bold text-[10px]">{b}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
             <div className="flex items-center gap-1 bg-secondary/20 h-8 px-2 rounded-lg border border-border">
               <span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground">Yr</span>
               <Select value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(parseInt(v))}>
