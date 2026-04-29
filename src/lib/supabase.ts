@@ -82,6 +82,7 @@ export const supabase = new Proxy({} as SupabaseClient, {
         client = createClient(supabaseUrl!, supabaseAnonKey!, {
           auth: {
             persistSession: true,
+            storage: typeof window !== 'undefined' ? window.sessionStorage : undefined,
             autoRefreshToken: true,
             detectSessionInUrl: false
           }

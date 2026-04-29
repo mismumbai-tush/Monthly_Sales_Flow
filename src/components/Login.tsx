@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { supabase } from '@/src/lib/supabase';
+import { supabase, isSupabaseConfigured } from '@/src/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,39 +26,112 @@ export default function Login() {
     setLoading(true);
     
     try {
+      if (!isSupabaseConfigured) {
+        throw new Error('Database is not configured. Please add SUPABASE_URL and SUPABASE_ANON_KEY to your secrets.');
+      }
+
+      if (!isSignUp) {
+        console.log('Clearing any existing stale session before login...');
+        await supabase.auth.signOut().catch(() => {});
+        if (typeof window !== 'undefined') {
+          sessionStorage.clear();
+        }
+      }
+
       if (isSignUp) {
         if (!firstName || !lastName) throw new Error('First and Last name are required');
         if (role !== 'Admin' && selectedBranches.length === 0) throw new Error('Please select at least one branch');
 
-        console.log('Attempting sign up for:', email);
-        const { data, error } = await supabase.auth.signUp({ 
+        const fullName = `${firstName} ${lastName}`;
+        console.log('Attempting sign up for:', email, 'Role:', role);
+        
+        const { data, error: signUpError } = await supabase.auth.signUp({ 
           email, 
           password,
           options: {
             data: {
-              full_name: `${firstName} ${lastName}`,
+              full_name: fullName,
               role: role,
               branch_ids: role === 'Admin' ? [] : selectedBranches
             }
           }
         });
         
-        if (error) throw error;
+        if (signUpError) throw signUpError;
         
-        if (data.session) {
-          toast.success('Successfully signed up and logged in!');
+        console.log('Sign up result:', data);
+
+        if (data.user && data.session) {
+          // If auto-confirm is on, we can create the profile record immediately
+          console.log('Session available, creating profile record...');
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .upsert({
+              id: data.user.id,
+              email: email,
+              role: role,
+              full_name: fullName,
+              branch_ids: role === 'Admin' ? [] : selectedBranches
+            });
+          
+          if (profileError) {
+            console.error('Profile creation error:', profileError);
+            // Don't throw here as the user is still logged in to Auth
+            toast.warning('Account created, but profile initialization failed. Please contact support.');
+          } else {
+            toast.success('Successfully signed up and logged in!');
+          }
+        } else if (data.user && !data.session) {
+          // Email confirmation required
+          console.log('No session returned - email verification likely required');
+          toast.success('Sign up successful! IMPORTANT: A verification email has been sent to ' + email + '. You MUST confirm your email before you can log in.', {
+            duration: 10000,
+          });
+          setIsSignUp(false);
         } else {
-          toast.success('Sign up successful! Please check your email for verification.');
+          toast.success('Account created successfully!');
           setIsSignUp(false);
         }
       } else {
         console.log('Attempting sign in for:', email);
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        
+        if (error) {
+          if (error.message.includes('Email not confirmed')) {
+            throw new Error('Your email has not been confirmed yet. Please check your inbox for the verification link.');
+          }
+          throw error;
+        }
+
+        if (data.user) {
+          // Check if profile exists, if not create it (safe fallback for users who didn't get a profile on signup)
+          const { data: existingProfile } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('id', data.user.id)
+            .maybeSingle();
+
+          if (!existingProfile) {
+            console.log('Profile missing on login, creating...');
+            await supabase
+              .from('profiles')
+              .insert({
+                id: data.user.id,
+                email: email,
+                role: data.user.user_metadata?.role || 'Sales Person',
+                full_name: data.user.user_metadata?.full_name || email.split('@')[0],
+                branch_ids: data.user.user_metadata?.branch_ids || []
+              });
+          }
+        }
+        
         toast.success('Logged in successfully');
       }
     } catch (error: any) {
-      toast.error(error.message);
+      console.error('Auth handler error:', error);
+      toast.error(error.message || 'An unexpected error occurred', {
+        duration: 5000
+      });
     } finally {
       setLoading(false);
     }
@@ -76,7 +149,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4 md:p-6 font-sans">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-background p-4 md:p-6 font-sans">
       <Card className="w-full max-w-lg shadow-2xl border-border rounded-3xl overflow-hidden bg-card">
         <CardHeader className="space-y-2 text-center bg-secondary/30 pb-6 pt-8 md:pb-8 md:pt-10 border-b border-border">
           <div className="mx-auto mb-4">
@@ -248,6 +321,23 @@ export default function Login() {
           </div>
         </CardContent>
       </Card>
+      
+      <div className="mt-8 text-center">
+        <button 
+          onClick={async () => {
+            if (confirm('This will clear all saved sessions and cookies for this app. Use this if you are seeing the wrong account. Continue?')) {
+              await supabase.auth.signOut();
+              localStorage.clear();
+              sessionStorage.clear();
+              window.location.reload();
+            }
+          }}
+          className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest hover:text-primary transition-colors flex items-center gap-2"
+        >
+          <X size={12} />
+          Trouble with account? Clear Data & Reset
+        </button>
+      </div>
     </div>
   );
 }

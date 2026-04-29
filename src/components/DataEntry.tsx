@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 interface DataEntryProps {
   profile: Profile | null;
   view: 'planning' | 'actuals';
+  initialSalespersonId?: string | null;
 }
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -28,13 +29,91 @@ interface SalesRow {
   salespersonIds?: Record<string, string>; // Map month to original salesperson ID
 }
 
-export default function DataEntry({ profile, view }: DataEntryProps) {
+export default function DataEntry({ profile, view, initialSalespersonId }: DataEntryProps) {
   const [rows, setRows] = useState<SalesRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState<string>('');
+  const [availableBranches, setAvailableBranches] = useState<string[]>([]);
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<string>('All');
   const [selectedUnit, setSelectedUnit] = useState<string>('All');
+  const [salespeople, setSalespeople] = useState<Profile[]>([]);
+  const [selectedSalesperson, setSelectedSalesperson] = useState<string>('All');
+
+  useEffect(() => {
+    async function fetchSalespeople() {
+      if (!selectedBranch || (profile?.role !== 'Admin' && profile?.role !== 'Branch Head')) {
+        setSalespeople([]);
+        return;
+      }
+      try {
+        const { data } = await supabase
+          .from('profiles')
+          .select('*')
+          .in('role', ['Sales Person', 'Branch Head'])
+          .contains('branch_ids', [selectedBranch]);
+        
+        // Ensure the currently selected salesperson is in the list
+        let updatedList = data || [];
+        
+        // If we have an initial salesperson ID (drill down) or a selected ID, 
+        // and it's NOT in the list, fetch it specifically
+        const targetId = initialSalespersonId || selectedSalesperson;
+        if (targetId && targetId !== 'All' && !updatedList.find(p => p.id === targetId)) {
+          const { data: sp } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', targetId)
+            .maybeSingle();
+          if (sp) {
+            updatedList = [...updatedList, sp];
+          }
+        }
+        
+        setSalespeople(updatedList);
+        
+        // If current selection is not 'All' and not in the new branch list (and not the initial salesperson), 
+        // reset to 'All'
+        if (selectedSalesperson !== 'All' && !updatedList.find(p => p.id === selectedSalesperson)) {
+          if (selectedSalesperson !== initialSalespersonId) {
+             setSelectedSalesperson('All');
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching salespeople:', error);
+      }
+    }
+    fetchSalespeople();
+  }, [selectedBranch, profile, initialSalespersonId]);
+
+  // Handle drill down logic
+  useEffect(() => {
+    async function resolveInitialEmployee() {
+      if (!initialSalespersonId || !profile) return;
+      
+      try {
+        // Fetch them specifically to get their branch_ids
+        const { data: sp } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', initialSalespersonId)
+          .single();
+
+        if (sp && sp.branch_ids && sp.branch_ids.length > 0) {
+          // If the salesperson is in a branch the user has access to
+          const firstValidBranch = sp.branch_ids.find(b => availableBranches.includes(b));
+          if (firstValidBranch) {
+            setSelectedBranch(firstValidBranch);
+            setSelectedSalesperson(initialSalespersonId);
+          }
+        }
+      } catch (error) {
+        console.error('Error resolving initial salesperson:', error);
+      }
+    }
+    
+    resolveInitialEmployee();
+  }, [initialSalespersonId, availableBranches, profile]);
   
   // Bulk entry state
   const [isBulkOpen, setIsBulkOpen] = useState(false);
@@ -55,8 +134,19 @@ export default function DataEntry({ profile, view }: DataEntryProps) {
   const isAllMonths = selectedMonth === 'All';
 
   useEffect(() => {
-    if (profile?.branch_ids && profile.branch_ids.length > 0) {
-      setSelectedBranch(profile.branch_ids[0]);
+    if (!profile) return;
+    
+    let branches: string[] = [];
+    if (profile.role === 'Admin') {
+      branches = ['Ahmedabad', 'Bangalore', 'Delhi', 'Jaipur', 'Kolkata', 'Ludhiana', 'Mumbai', 'Surat', 'Tirupur', 'Ulhasnagar'];
+    } else {
+      branches = profile.branch_ids || [];
+    }
+    
+    setAvailableBranches(branches);
+    
+    if (branches.length > 0) {
+      setSelectedBranch(prev => branches.includes(prev) ? prev : branches[0]);
     } else {
       setSelectedBranch('default_branch');
     }
@@ -64,11 +154,12 @@ export default function DataEntry({ profile, view }: DataEntryProps) {
 
   useEffect(() => {
     fetchExistingData();
-  }, [view, selectedBranch, selectedYear]);
+  }, [view, selectedBranch, selectedYear, selectedSalesperson]);
 
   const fetchExistingData = async () => {
     if (!profile || !selectedBranch) return;
     setLoading(true);
+    console.log(`FETCHING DATA: View=${view}, Branch=${selectedBranch}, Year=${selectedYear}, Salesperson=${selectedSalesperson}`);
     try {
       let query = supabase
         .from('sales_data')
@@ -76,9 +167,11 @@ export default function DataEntry({ profile, view }: DataEntryProps) {
         .eq('year', selectedYear)
         .eq('branch_id', selectedBranch);
 
-      // Branch Head sees all salespeople in their branch, Sales Person only sees own
+      // Branch Head/Admin can filter by specific salesperson, Sales Person only sees own
       if (profile.role === 'Sales Person') {
         query = query.eq('salesperson_id', profile.id);
+      } else if (selectedSalesperson && selectedSalesperson !== 'All') {
+        query = query.eq('salesperson_id', selectedSalesperson);
       }
 
       const { data, error } = await query;
@@ -168,6 +261,10 @@ export default function DataEntry({ profile, view }: DataEntryProps) {
 
       // Determine which months to process (all months or just the selected one)
       const monthsToProcess = selectedMonth === 'All' ? MONTHS : [selectedMonth];
+      
+      const targetSalespersonId = (profile.role === 'Admin' || profile.role === 'Branch Head') && selectedSalesperson !== 'All' 
+        ? selectedSalesperson 
+        : profile.id;
 
       for (const row of rows) {
         if (!row.customerName || !row.unit) continue;
@@ -180,7 +277,7 @@ export default function DataEntry({ profile, view }: DataEntryProps) {
             year: selectedYear,
             target_amount: row.targets[month] || 0,
             actual_amount: row.actuals[month] || 0,
-            salesperson_id: row.salespersonIds?.[month] || profile.id,
+            salesperson_id: row.salespersonIds?.[month] || targetSalespersonId,
             branch_id: selectedBranch,
             target_unit: 0,
             actual_unit: 0
@@ -226,6 +323,10 @@ export default function DataEntry({ profile, view }: DataEntryProps) {
     try {
       const payload: any[] = [];
       
+      const targetSalespersonId = (profile.role === 'Admin' || profile.role === 'Branch Head') && selectedSalesperson !== 'All' 
+        ? selectedSalesperson 
+        : profile.id;
+      
       for (const unit of UNITS) {
         const targetValue = parseFloat(bulkTargets[unit] || '0');
         if (targetValue > 0) {
@@ -236,7 +337,7 @@ export default function DataEntry({ profile, view }: DataEntryProps) {
             year: selectedYear,
             target_amount: targetValue,
             actual_amount: 0,
-            salesperson_id: profile.id,
+            salesperson_id: targetSalespersonId,
             branch_id: selectedBranch,
             target_unit: 0,
             actual_unit: 0
@@ -313,9 +414,38 @@ export default function DataEntry({ profile, view }: DataEntryProps) {
             <h2 className="text-[10px] md:text-xs lg:text-sm font-black uppercase tracking-tight leading-none text-primary whitespace-nowrap">
               {view === 'planning' ? 'Target Planning' : 'Actual Sales Entry'}
             </h2>
-            <p className="text-[8px] md:text-[9px] text-muted-foreground font-bold uppercase tracking-tighter whitespace-nowrap">Branch: {selectedBranch}</p>
+            <p className="text-[8px] md:text-[9px] text-muted-foreground font-bold uppercase tracking-tighter whitespace-nowrap">Branch Name: {selectedBranch}</p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            {(profile?.role === 'Admin' || profile?.role === 'Branch Head') && (
+              <div className="flex items-center gap-1 bg-primary/5 h-8 px-2 rounded-lg border border-primary/20">
+                <span className="text-[8px] font-black uppercase tracking-widest text-primary mr-1">Employee Name</span>
+                <Select value={selectedSalesperson} onValueChange={setSelectedSalesperson}>
+                  <SelectTrigger className="w-[130px] md:w-[160px] h-6 font-black text-[10px] border-none bg-background shadow-sm rounded-md text-primary">
+                    <SelectValue placeholder="Select Employee" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="All" className="font-bold text-[10px]">All Employees</SelectItem>
+                    {salespeople.map(p => (
+                      <SelectItem key={p.id} value={p.id} className="font-bold text-[10px]">{p.full_name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="flex items-center gap-1 bg-secondary/20 h-8 px-2 rounded-lg border border-border">
+              <span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground mr-1">Branch Name</span>
+              <Select value={selectedBranch || ''} onValueChange={setSelectedBranch}>
+                <SelectTrigger className="w-[110px] md:w-[130px] h-6 font-black text-[10px] border-none bg-background shadow-sm rounded-md">
+                  <SelectValue placeholder="Select Branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableBranches.map(b => (
+                    <SelectItem key={b} value={b} className="font-bold text-[10px]">{b}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex items-center gap-1 bg-secondary/20 h-8 px-2 rounded-lg border border-border">
               <span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground">Yr</span>
               <Select value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(parseInt(v))}>

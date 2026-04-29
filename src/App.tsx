@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 
 const Dashboard = lazy(() => import('@/src/components/Dashboard'));
 const DataEntry = lazy(() => import('@/src/components/DataEntry'));
+const Branches = lazy(() => import('@/src/components/Branches'));
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -44,6 +45,12 @@ export default function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [drillDownEmployeeId, setDrillDownEmployeeId] = useState<string | null>(null);
+
+  const handleDrillDown = useCallback((employeeId: string) => {
+    setDrillDownEmployeeId(employeeId);
+    setActiveTab('actual-entry');
+  }, []);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [configError, setConfigError] = useState<string | null>(null);
   const [showForceRefresh, setShowForceRefresh] = useState(false);
@@ -67,6 +74,10 @@ export default function App() {
     
     console.log('--- fetchProfile START for', userId);
     try {
+      // Get session email for logging
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      console.log('--- Auth Email:', currentSession?.user?.email);
+
       // Add a race here too just in case the profile query hangs
       const profilePromise = supabase
         .from('profiles')
@@ -88,7 +99,20 @@ export default function App() {
         console.log('--- profile FOUND:', data.full_name);
         setProfile(data);
       } else {
-        console.log('--- no profile record found yet');
+        console.log('--- no profile record found yet, using session metadata');
+        // If we have a session, we can extract the metadata from it
+        supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
+          if (currentSession?.user) {
+            const metadata = currentSession.user.user_metadata;
+            setProfile({
+              id: currentSession.user.id,
+              email: currentSession.user.email || '',
+              role: metadata.role || 'Sales Person',
+              full_name: metadata.full_name || currentSession.user.email?.split('@')[0],
+              branch_ids: metadata.branch_ids || []
+            });
+          }
+        });
       }
     } catch (error) {
       console.error('CRITICAL Error in fetchProfile:', error);
@@ -116,36 +140,41 @@ export default function App() {
       console.log('INITIALIZE: Step 1 (Auth Check)');
       
       try {
-        const sessionPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise<{data: {session: null}, error: Error}>((_, reject) => 
-          setTimeout(() => reject(new Error('Auth check timed out after 12s')), 12000)
+        // Start getSession but don't wait indefinitely if onAuthStateChange can trigger faster
+        const sessionPromise = supabase.auth.getSession().catch(e => ({ data: { session: null }, error: e }));
+        
+        const timeoutPromise = new Promise<{data: {session: any}, error: Error | null}>((resolve) => 
+          setTimeout(() => {
+            console.warn('Auth session check timed out, relying on onAuthStateChange or manual login');
+            resolve({ data: { session: null }, error: null });
+          }, 5000) // 5s is plenty for a local check
         );
 
-        const { data, error } = await (Promise.race([sessionPromise, timeoutPromise]) as any);
-        
-        if (error) throw error;
-        
-        const initialSession = data.session;
-        console.log('INITIALIZE: Step 2 (Session Result):', !!initialSession);
+        const result = await (Promise.race([sessionPromise, timeoutPromise]) as any);
+        const initialSession = result?.data?.session;
         
         if (!mounted) return;
 
         if (initialSession) {
+          console.log('INITIALIZE: Step 2 (Session Found via getSession)');
           setSession(initialSession);
           await fetchProfile(initialSession.user.id);
         } else {
-          console.log('INITIALIZE: Step 2 (No session found)');
-          setLoading(false);
+          // If no session from getSession, check if we're already loading via onAuthStateChange
+          if (!session && loading) {
+            console.log('INITIALIZE: Step 2 (No session from getSession, waiting for auth listener)');
+            // We give it a bit more time for the listener, otherwise we stop loading
+            setTimeout(() => {
+              if (mounted && loading && !session) {
+                console.log('INITIALIZE: Step 3 (Final fallback - no user detected)');
+                setLoading(false);
+              }
+            }, 2000);
+          }
         }
       } catch (err) {
         console.error('INITIALIZE: Error:', err);
-        if (mounted) {
-          setLoading(false);
-          // If we timeout, we assume no session and allow manual login
-          if (err instanceof Error && err.message.includes('timed out')) {
-            console.warn('Auth check timed out, continuing to Login screen');
-          }
-        }
+        if (mounted) setLoading(false);
       }
     };
 
@@ -176,23 +205,36 @@ export default function App() {
   const handleLogout = async () => {
     try {
       setLoading(true);
-      // Wait for sign out
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
-      
-      // Force clear state as a safety measure
+      // Force clear state immediately to avoid flickers
       setSession(null);
       setProfile(null);
+      setActiveTab('dashboard');
+      setDrillDownEmployeeId(null);
+      
+      // Specifically clear storage to be extra sure
+      if (typeof window !== 'undefined') {
+        // Clear everything to prevent session jumping
+        localStorage.clear();
+        sessionStorage.clear();
+        
+        // Find and remove any supabase specific keys specifically if clear() was blocked
+        Object.keys(localStorage).forEach(key => {
+          if (key.includes('supabase.auth.token')) localStorage.removeItem(key);
+        });
+      }
+      
+      // Attempt sign out from Supabase
+      await supabase.auth.signOut({ scope: 'local' }).catch(err => console.warn('SignOut error ignored:', err));
+      
       toast.success('Logged out successfully');
+      
+      // Force a clean state reload to ensure no memory residue
+      window.location.href = window.location.origin;
     } catch (err: any) {
       console.error('Logout error:', err);
-      toast.error('Logout failed: ' + err.message);
-      
-      // Fallback: clear state anyway if it was a network error or session expiration
-      if (err.message.includes('Fetch') || err.message.includes('network')) {
-        setSession(null);
-        setProfile(null);
-      }
+      setSession(null);
+      setProfile(null);
+      window.location.reload();
     } finally {
       setLoading(false);
       setIsSidebarOpen(false);
@@ -393,7 +435,14 @@ export default function App() {
               <Database size={18} />
               Actual Entry
             </li>
-            <li className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground/30 font-medium cursor-not-allowed">
+            <li 
+              onClick={() => { setActiveTab('branches'); setIsSidebarOpen(false); }}
+              className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer transition-all ${
+                activeTab === 'branches' 
+                ? 'bg-sidebar-accent text-sidebar-accent-foreground font-bold shadow-sm' 
+                : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/30 hover:text-sidebar-foreground'
+              }`}
+            >
               <Users size={18} />
               Branches
             </li>
@@ -436,7 +485,7 @@ export default function App() {
                 />
               </div>
               <h1 className="text-base lg:text-2xl font-bold tracking-tight truncate">
-                {activeTab === 'dashboard' ? 'Insights Overview' : activeTab === 'target-planning' ? 'Target Planning' : 'Monthly Actual Entry'}
+                {activeTab === 'dashboard' ? 'Insights Overview' : activeTab === 'target-planning' ? 'Target Planning' : activeTab === 'branches' ? 'Branch Performance' : 'Monthly Actual Entry'}
               </h1>
             </div>
           </div>
@@ -467,7 +516,12 @@ export default function App() {
             </TabsContent>
             <TabsContent value="actual-entry" className="mt-0 flex-1 outline-none ring-offset-background">
               <Suspense fallback={<DataEntrySkeleton />}>
-                <DataEntry profile={profile} view="actuals" />
+                <DataEntry profile={profile} view="actuals" initialSalespersonId={drillDownEmployeeId} />
+              </Suspense>
+            </TabsContent>
+            <TabsContent value="branches" className="mt-0 flex-1 outline-none ring-offset-background">
+              <Suspense fallback={<DashboardSkeleton />}>
+                <Branches profile={profile} onEmployeeClick={handleDrillDown} />
               </Suspense>
             </TabsContent>
           </Tabs>
@@ -497,10 +551,10 @@ export default function App() {
             <span className="text-[10px] font-bold uppercase tracking-tighter">Actuals</span>
           </button>
           <button 
-            disabled
-            className="flex flex-col items-center gap-1 text-muted-foreground/30"
+            onClick={() => setActiveTab('branches')}
+            className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'branches' ? 'text-primary' : 'text-muted-foreground'}`}
           >
-            <Users size={20} />
+            <Users size={20} className={activeTab === 'branches' ? 'fill-primary/20' : ''} />
             <span className="text-[10px] font-bold uppercase tracking-tighter">Branches</span>
           </button>
         </nav>

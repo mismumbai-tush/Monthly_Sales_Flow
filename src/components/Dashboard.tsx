@@ -54,7 +54,7 @@ export default function Dashboard({ profile }: DashboardProps) {
 
   const fetchSalespersons = useCallback(async () => {
     try {
-      let query = supabase.from('profiles').select('id, full_name, branch_ids').eq('role', 'Sales Person');
+      let query = supabase.from('profiles').select('id, full_name, branch_ids').in('role', ['Sales Person', 'Branch Head']);
       
       const { data: users, error } = await query;
       if (error) throw error;
@@ -273,7 +273,7 @@ export default function Dashboard({ profile }: DashboardProps) {
             </div>
 
             <div className="space-y-1">
-              <Label className="text-[8px] font-black uppercase tracking-widest text-muted-foreground ml-1">Branch</Label>
+              <Label className="text-[8px] font-black uppercase tracking-widest text-muted-foreground ml-1">Branch Name</Label>
               <Select value={filters.branch} onValueChange={(v) => {
                 setFilters(prev => ({ ...prev, branch: v, salesperson: 'All' }));
               }}>
@@ -288,13 +288,13 @@ export default function Dashboard({ profile }: DashboardProps) {
             </div>
 
             <div className="space-y-1 sm:col-span-2 lg:col-span-1">
-              <Label className="text-[8px] font-black uppercase tracking-widest text-muted-foreground ml-1">Salesperson</Label>
+              <Label className="text-[8px] font-black uppercase tracking-widest text-muted-foreground ml-1">Employee Name</Label>
               <Select value={filters.salesperson} onValueChange={(v) => setFilters(prev => ({ ...prev, salesperson: v }))}>
                 <SelectTrigger className="h-8 w-full lg:w-36 border-muted/30 bg-secondary/5 focus:ring-primary/20 rounded-lg font-bold text-[11px]">
-                  <SelectValue placeholder="Salesperson" />
+                  <SelectValue placeholder="Employee" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="All">All Persons</SelectItem>
+                  <SelectItem value="All">All Employees</SelectItem>
                   {availableSalespersons.map(s => (
                     <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
                   ))}
@@ -369,7 +369,7 @@ export default function Dashboard({ profile }: DashboardProps) {
 
         <Card className="border-border shadow-sm rounded-2xl bg-card overflow-hidden flex flex-col h-[300px] lg:h-[350px]">
           <CardHeader className="pb-1 pt-4">
-            <CardTitle className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">Salesperson: Target vs Actual</CardTitle>
+            <CardTitle className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">Employee: Target vs Actual</CardTitle>
           </CardHeader>
           <CardContent className="flex-1 pb-4 pt-2 overflow-hidden">
             <ResponsiveContainer width="100%" height="100%">
@@ -392,7 +392,7 @@ export default function Dashboard({ profile }: DashboardProps) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <Card className="border-border shadow-sm rounded-2xl bg-card overflow-hidden h-[350px]">
           <CardHeader className="pb-1 pt-4">
-            <CardTitle className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">Salesperson Revenue Performance</CardTitle>
+            <CardTitle className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">Employee Revenue Performance</CardTitle>
           </CardHeader>
           <CardContent className="flex-1 pb-4 pt-2 overflow-hidden">
             <ResponsiveContainer width="100%" height="100%">
