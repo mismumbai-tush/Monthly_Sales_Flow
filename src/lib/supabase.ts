@@ -78,16 +78,14 @@ export const supabase = new Proxy({} as SupabaseClient, {
     
     if (!client) {
       try {
-        console.log('Attempting to initialize Supabase client...');
         client = createClient(supabaseUrl!, supabaseAnonKey!, {
           auth: {
             persistSession: true,
-            storage: typeof window !== 'undefined' ? window.sessionStorage : undefined,
+            storage: typeof window !== 'undefined' ? window.localStorage : undefined,
             autoRefreshToken: true,
             detectSessionInUrl: false
           }
         });
-        console.log('Supabase client initialized successfully.');
       } catch (e) {
         console.error('CRITICAL: Supabase createClient failed:', e);
         return createSafeDummy(prop);

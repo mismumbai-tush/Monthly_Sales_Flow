@@ -23,7 +23,7 @@ const MONTHS = [
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
-const YEARS = [2024, 2025, 2026];
+const YEARS = Array.from({ length: 13 }, (_, i) => 2024 + i);
 
 export default function Dashboard({ profile }: DashboardProps) {
   const [data, setData] = useState<SalesData[]>([]);
@@ -34,7 +34,7 @@ export default function Dashboard({ profile }: DashboardProps) {
   const [filters, setFilters] = useState({
     customer: '',
     month: 'All',
-    year: 'All',
+    year: new Date().getFullYear().toString(),
     unit: 'All',
     branch: 'All',
     salesperson: 'All'
@@ -50,7 +50,6 @@ export default function Dashboard({ profile }: DashboardProps) {
 
   const profileId = profile?.id;
   const profileRole = profile?.role;
-  const profileBranches = JSON.stringify(profile?.branch_ids);
 
   const fetchSalespersons = useCallback(async () => {
     try {
@@ -71,7 +70,6 @@ export default function Dashboard({ profile }: DashboardProps) {
       let query = supabase.from('sales_data').select('*');
 
       // Add a default filter to not fetch historical data unnecessarily
-      // If user hasn't selected a specific year, default to current year
       if (filters.year === 'All') {
         query = query.eq('year', new Date().getFullYear());
       } else {
@@ -81,10 +79,14 @@ export default function Dashboard({ profile }: DashboardProps) {
       // RBAC filtering
       if (profileRole === 'Sales Person') {
         query = query.eq('salesperson_id', profileId);
-      } else if (profileRole === 'Branch Head' && profileBranches) {
-        const branches = JSON.parse(profileBranches);
+      } else if (profileRole === 'Branch Head') {
+        const branches = profile?.branch_ids || [];
         if (branches.length > 0) {
           query = query.in('branch_id', branches);
+        } else {
+          // If branch head has no branches, they shouldn't see anything or just their own?
+          // Usually they have at least one. If none, we filter by an impossible branch to be safe
+          query = query.eq('branch_id', 'no_branch_assigned');
         }
       }
 
@@ -96,7 +98,7 @@ export default function Dashboard({ profile }: DashboardProps) {
     } finally {
       setLoading(false);
     }
-  }, [profileId, profileRole, profileBranches, filters.year]);
+  }, [profileId, profileRole, profile?.branch_ids, filters.year]);
 
   useEffect(() => {
     if (profileId) {
@@ -114,8 +116,9 @@ export default function Dashboard({ profile }: DashboardProps) {
     }
     
     // If Branch Head, they only see salespeople in their own branches
-    if (profileRole === 'Branch Head' && profile?.branch_ids) {
-      list = list.filter(s => s.branch_ids?.some(b => profile.branch_ids?.includes(b)));
+    if (profileRole === 'Branch Head') {
+      const myBranches = profile?.branch_ids || [];
+      list = list.filter(s => s.branch_ids?.some(b => myBranches.includes(b)));
     }
 
     // If Sales Person, they only see themselves
@@ -352,8 +355,8 @@ export default function Dashboard({ profile }: DashboardProps) {
           <CardHeader className="pb-1 pt-4">
             <CardTitle className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">Unit-wise Target vs Actual</CardTitle>
           </CardHeader>
-          <CardContent className="flex-1 pb-4 pt-2 overflow-hidden">
-            <ResponsiveContainer width="100%" height="100%">
+          <CardContent className="flex-1 pb-4 pt-2 overflow-hidden min-h-[220px]">
+            <ResponsiveContainer width="100%" height="100%" minHeight={200}>
               <BarChart data={unitChartData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#64748B' }} interval={0} />
@@ -373,8 +376,8 @@ export default function Dashboard({ profile }: DashboardProps) {
           <CardHeader className="pb-1 pt-4">
             <CardTitle className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">Employee: Target vs Actual</CardTitle>
           </CardHeader>
-          <CardContent className="flex-1 pb-4 pt-2 overflow-hidden">
-            <ResponsiveContainer width="100%" height="100%">
+          <CardContent className="flex-1 pb-4 pt-2 overflow-hidden min-h-[220px]">
+            <ResponsiveContainer width="100%" height="100%" minHeight={200}>
               <BarChart data={salespersonChartData} layout="vertical" margin={{ left: -20 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                 <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#64748B' }} />
@@ -396,8 +399,8 @@ export default function Dashboard({ profile }: DashboardProps) {
           <CardHeader className="pb-1 pt-4">
             <CardTitle className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">Employee Revenue Performance</CardTitle>
           </CardHeader>
-          <CardContent className="flex-1 pb-4 pt-2 overflow-hidden">
-            <ResponsiveContainer width="100%" height="100%">
+          <CardContent className="flex-1 pb-4 pt-2 overflow-hidden min-h-[220px]">
+            <ResponsiveContainer width="100%" height="100%" minHeight={200}>
               <BarChart data={salespersonChartData} margin={{ bottom: 40 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#64748B' }} angle={-45} textAnchor="end" height={60} />
@@ -421,8 +424,8 @@ export default function Dashboard({ profile }: DashboardProps) {
           <CardHeader className="pb-1 pt-4">
             <CardTitle className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">Monthly Achievement Trend</CardTitle>
           </CardHeader>
-          <CardContent className="flex-1 pb-4 pt-2 overflow-hidden">
-            <ResponsiveContainer width="100%" height="100%">
+          <CardContent className="flex-1 pb-4 pt-2 overflow-hidden min-h-[220px]">
+            <ResponsiveContainer width="100%" height="100%" minHeight={200}>
               <AreaChart data={monthlyTrendData}>
                 <defs>
                   <linearGradient id="colorActual" x1="0" y1="0" x2="0" y2="1">

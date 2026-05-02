@@ -56,12 +56,13 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
         if (error) throw error;
 
         // Filter manually to ensure accuracy with array fields
-        let branchEmployees = (data || []).filter(p => 
-          p.branch_ids && Array.isArray(p.branch_ids) && p.branch_ids.includes(selectedBranch)
-        );
+        let branchEmployees = (data || []).filter(p => {
+          if (selectedBranch === 'All') return true;
+          return p.branch_ids && Array.isArray(p.branch_ids) && p.branch_ids.includes(selectedBranch);
+        });
 
         // Sort by name
-        branchEmployees.sort((a, b) => a.full_name.localeCompare(b.full_name));
+        branchEmployees.sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
         
         // Ensure the currently selected salesperson is in the list
         let updatedList = [...branchEmployees];
@@ -146,9 +147,14 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
     
     let branches: string[] = [];
     if (profile.role === 'Admin') {
-      branches = BRANCHES;
+      branches = ['All', ...BRANCHES];
     } else {
       branches = profile.branch_ids || [];
+      // If user has multiple branches, maybe they want an 'All' too? 
+      // But the request specifically mentioned admin login.
+      if (branches.length > 1) {
+        branches = ['All', ...branches];
+      }
     }
     
     setAvailableBranches(branches);
@@ -169,48 +175,129 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
     setLoading(true);
     console.log(`FETCHING DATA: View=${view}, Branch=${selectedBranch}, Year=${selectedYear}, Salesperson=${selectedSalesperson}`);
     try {
-      let query = supabase
+      // Step 1: Fetch the "Master List" of active customers/units for this context
+      // We look at the selected year AND the previous year to give them continuity
+      let masterQuery = supabase
         .from('sales_data')
-        .select('*')
-        .eq('year', selectedYear)
-        .eq('branch_id', selectedBranch);
+        .select('customer_name, unit_name, branch_id')
+        .or(`year.eq.${selectedYear},year.eq.${selectedYear - 1}`);
 
-      // Branch Head/Admin can filter by specific salesperson, Sales Person only sees own
-      if (profile.role === 'Sales Person') {
-        query = query.eq('salesperson_id', profile.id);
-      } else if (selectedSalesperson && selectedSalesperson !== 'All') {
-        query = query.eq('salesperson_id', selectedSalesperson);
+      if (selectedBranch !== 'All') {
+        masterQuery = masterQuery.eq('branch_id', selectedBranch);
       }
 
-      const { data, error } = await query;
+      if (profile.role === 'Sales Person') {
+        masterQuery = masterQuery.eq('salesperson_id', profile.id);
+      } else if (selectedSalesperson && selectedSalesperson !== 'All') {
+        masterQuery = masterQuery.eq('salesperson_id', selectedSalesperson);
+      }
 
+      const { data: masterData } = await masterQuery;
+
+      // Unique combinations of customer and unit
+      const masterRows = new Map<string, { customer: string; unit: string }>();
+      (masterData || []).forEach(item => {
+        const key = `${item.customer_name}-${item.unit_name}`;
+        if (!masterRows.has(key)) {
+          masterRows.set(key, { customer: item.customer_name, unit: item.unit_name });
+        }
+      });
+
+      // Step 2: Fetch actual data for the SELECTED year
+      let dataQuery = supabase
+        .from('sales_data')
+        .select('*')
+        .eq('year', selectedYear);
+
+      if (selectedBranch !== 'All') {
+        dataQuery = dataQuery.eq('branch_id', selectedBranch);
+      }
+
+      if (profile.role === 'Sales Person') {
+        dataQuery = dataQuery.eq('salesperson_id', profile.id);
+      } else if (selectedSalesperson && selectedSalesperson !== 'All') {
+        dataQuery = dataQuery.eq('salesperson_id', selectedSalesperson);
+      }
+
+      const { data: yearData, error } = await dataQuery;
       if (error) throw error;
 
-      if (data && data.length > 0) {
-        // Group data by customer and unit
-        const grouped: Record<string, SalesRow> = {};
-        data.forEach(item => {
-          const key = `${item.customer_name}-${item.unit_name}`;
-          if (!grouped[key]) {
-            grouped[key] = {
-              id: key,
-              customerName: item.customer_name,
-              unit: item.unit_name,
-              targets: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
-              actuals: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
-              dbIds: {},
-              salespersonIds: {}
-            };
-          }
-          grouped[key].targets[item.month] = item.target_amount;
-          grouped[key].actuals[item.month] = item.actual_amount;
-          if (grouped[key].dbIds) grouped[key].dbIds![item.month] = item.id;
-          if (grouped[key].salespersonIds) grouped[key].salespersonIds![item.month] = item.salesperson_id;
+      // Group actual year data - include branch_id in key if 'All' is selected
+      const yearGrouped: Record<string, any> = {};
+      (yearData || []).forEach(item => {
+        const key = selectedBranch === 'All' 
+          ? `${item.branch_id}-${item.customer_name}-${item.unit_name}`
+          : `${item.customer_name}-${item.unit_name}`;
+          
+        if (!yearGrouped[key]) {
+          yearGrouped[key] = {
+            targets: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
+            actuals: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
+            dbIds: {},
+            salespersonIds: {},
+            branch_id: item.branch_id
+          };
+        }
+        yearGrouped[key].targets[item.month] = item.target_amount;
+        yearGrouped[key].actuals[item.month] = item.actual_amount;
+        yearGrouped[key].dbIds[item.month] = item.id;
+        yearGrouped[key].salespersonIds[item.month] = item.salesperson_id;
+      });
+
+      // Step 3: Combine Master list with Year Data
+      const finalRowMap: Record<string, SalesRow & { branchId?: string }> = {};
+      
+      // If selectedBranch is 'All', we use the yearData as the primary source for rows 
+      // because a "Master List" across ALL branches without specific branch context for new entries would be messy.
+      
+      if (selectedBranch === 'All') {
+        Object.keys(yearGrouped).forEach(key => {
+          const yearInfo = yearGrouped[key];
+          const parts = key.split('-');
+          const branchId = parts[0];
+          const customer = parts[1];
+          const unit = parts[2];
+          
+          finalRowMap[key] = {
+            id: Object.values(yearInfo.dbIds)[0] as string || key,
+            customerName: customer,
+            unit: unit,
+            targets: yearInfo.targets,
+            actuals: yearInfo.actuals,
+            dbIds: yearInfo.dbIds,
+            salespersonIds: yearInfo.salespersonIds,
+            branchId: yearInfo.branch_id
+          };
         });
-        setRows(Object.values(grouped));
-      } else if (view === 'planning') {
-        // If planning and no data, show empty rows
-        const initialRows: SalesRow[] = Array.from({ length: 5 }).map(() => ({
+      } else {
+        // Normal single branch logic
+        masterRows.forEach((val, key) => {
+          const yearInfo = yearGrouped[key] || {
+            targets: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
+            actuals: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
+            dbIds: {},
+            salespersonIds: {},
+            branch_id: selectedBranch
+          };
+
+          finalRowMap[key] = {
+            id: (yearInfo.dbIds && Object.values(yearInfo.dbIds)[0]) as string || key,
+            customerName: val.customer,
+            unit: val.unit,
+            targets: yearInfo.targets,
+            actuals: yearInfo.actuals,
+            dbIds: yearInfo.dbIds,
+            salespersonIds: yearInfo.salespersonIds,
+            branchId: selectedBranch
+          };
+        });
+      }
+
+      let finalRows = Object.values(finalRowMap);
+
+      if (finalRows.length === 0 && view === 'planning') {
+        // If still no rows, provide some empty ones
+        finalRows = Array.from({ length: 5 }).map(() => ({
           id: Math.random().toString(36).substring(2, 11),
           customerName: '',
           unit: '',
@@ -218,10 +305,10 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
           actuals: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
           salespersonIds: {}
         }));
-        setRows(initialRows);
-      } else {
-        setRows([]);
       }
+
+      // Sort alphabetically by customer name
+      setRows(finalRows.sort((a, b) => a.customerName.localeCompare(b.customerName)));
     } catch (error: any) {
       toast.error('Failed to fetch data: ' + error.message);
     } finally {
@@ -240,8 +327,50 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
     }]);
   };
 
-  const removeRow = (id: string) => {
-    setRows(rows.filter(r => r.id !== id));
+  const handleDeleteRow = async (row: SalesRow) => {
+    if (!profile) return;
+    
+    // If it's a completely new row with no customer name, just remove locally
+    if (!row.customerName) {
+      setRows(rows.filter(r => r.id !== row.id));
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to delete ALL records for "${row.customerName}" (${row.unit})? This will remove this client from Planning, Actuals, and the Dashboard for the current year.`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      console.log(`DELETE START: Removing records for ${row.customerName} - ${row.unit}`);
+      
+      // Perform a targeted delete based on customer name, unit, year and branch
+      let deleteQuery = supabase
+        .from('sales_data')
+        .delete()
+        .eq('customer_name', row.customerName)
+        .eq('unit_name', row.unit)
+        .eq('year', selectedYear);
+
+      if (selectedBranch !== 'All') {
+        deleteQuery = deleteQuery.eq('branch_id', selectedBranch);
+      } else if ((row as any).branchId) {
+        // If All Branches are shown, pinpoint the specific branch for this row
+        deleteQuery = deleteQuery.eq('branch_id', (row as any).branchId);
+      }
+
+      const { error } = await deleteQuery;
+
+      if (error) throw error;
+
+      toast.success(`Deleted ${row.customerName} successfully`);
+      setRows(prev => prev.filter(r => r.id !== row.id));
+    } catch (error: any) {
+      console.error('Delete Failed:', error);
+      toast.error('Delete failed: ' + (error.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const updateRow = (id: string, field: string, value: any) => {
@@ -261,12 +390,33 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
   };
 
   const handleSubmit = async () => {
-    if (!profile) return;
-    setLoading(true);
-    try {
-      const payload: any[] = [];
-      const updatePayload: any[] = [];
+    if (!profile) {
+      toast.error('Session lost. Please login again.');
+      return;
+    }
+    
+    if (!selectedBranch || selectedBranch === 'default_branch' || selectedBranch === 'All') {
+      toast.error('Please select a specific branch before saving.');
+      return;
+    }
 
+    // Verify if we're trying to save new rows in 'All' mode
+    const hasNewRows = rows.some(r => !r.dbIds || Object.keys(r.dbIds).length === 0);
+    if (hasNewRows && (profile.role === 'Admin' || profile.role === 'Branch Head') && selectedSalesperson === 'All') {
+      toast.error('Cannot save new rows when "All Employees" is selected. Please select a specific employee to assign these records.');
+      return;
+    }
+
+    setLoading(true);
+    const combinedPayload: any[] = [];
+    
+    // Timeout safeguard - reduced to 20s for faster failure feedback
+    const timeoutId = setTimeout(() => {
+      setLoading(false);
+      toast.error('Save request timed out. Please try again.');
+    }, 20000);
+
+    try {
       // Determine which months to process (all months or just the selected one)
       const monthsToProcess = selectedMonth === 'All' ? MONTHS : [selectedMonth];
       
@@ -274,11 +424,13 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
         ? selectedSalesperson 
         : profile.id;
 
+      console.log(`SAVE START: Branch=${selectedBranch}, Year=${selectedYear}, User=${profile.full_name}`);
+
       for (const row of rows) {
         if (!row.customerName || !row.unit) continue;
 
         monthsToProcess.forEach(month => {
-          const entry = {
+          const entry: any = {
             customer_name: row.customerName,
             unit_name: row.unit,
             month,
@@ -291,33 +443,51 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
             actual_unit: 0
           };
 
+          // If it exists in DB, include ID to update
           if (row.dbIds?.[month]) {
-            updatePayload.push({
-              id: row.dbIds[month],
-              ...entry
-            });
-          } else if (row.targets[month] > 0 || row.actuals[month] > 0) {
-            payload.push(entry);
+            entry.id = row.dbIds[month];
+          }
+
+          // Only push if it's an update OR if it has some non-zero values
+          if (entry.id || entry.target_amount > 0 || entry.actual_amount > 0) {
+            combinedPayload.push(entry);
           }
         });
       }
 
-      if (payload.length > 0) {
-        const { error } = await supabase.from('sales_data').insert(payload);
-        if (error) throw error;
+      if (combinedPayload.length > 0) {
+        console.log(`SUBMIT: Sending ${combinedPayload.length} records to Supabase`);
+        const { error } = await supabase.from('sales_data').upsert(combinedPayload);
+        if (error) {
+          console.error('Supabase Upsert Error:', error);
+          throw error;
+        }
+        toast.success(view === 'planning' ? 'Target Planning submitted!' : 'Actual Entry saved!');
+        
+        // Refresh data in background
+        fetchExistingData();
+      } else {
+        toast.info('No changes detected to save.');
       }
-
-      if (updatePayload.length > 0) {
-        const { error } = await supabase.from('sales_data').upsert(updatePayload);
-        if (error) throw error;
-      }
-
-      toast.success('Data saved successfully!');
-      fetchExistingData();
     } catch (error: any) {
-      console.error('Submit Error:', error);
-      toast.error('Save failed: ' + error.message);
+      console.error('Submit Error Details:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+        payloadSize: combinedPayload.length
+      });
+      
+      let errorMsg = error.message;
+      if (error.code === '42501') {
+        errorMsg = 'Permission Denied (RLS). You may not have access to modify these records.';
+      } else if (error.code === '23505') {
+        errorMsg = 'Conflict detected: A record with this information already exists.';
+      }
+      
+      toast.error('Save failed: ' + errorMsg);
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   };
@@ -328,6 +498,12 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
       return;
     }
     setLoading(true);
+    
+    const timeoutId = setTimeout(() => {
+      setLoading(false);
+      toast.error('Bulk save timed out.');
+    }, 45000);
+
     try {
       const payload: any[] = [];
       
@@ -354,14 +530,20 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
       }
 
       if (payload.length > 0) {
+        console.log('BULK SUBMIT: Fetching existing records for conflict check...');
         // Find existing records first to see if we should update or insert
-        const { data: existingRecords } = await supabase
+        const { data: existingRecords, error: fetchError } = await supabase
           .from('sales_data')
           .select('id, customer_name, unit_name, month, year, branch_id')
           .eq('customer_name', bulkCustomer)
           .eq('month', bulkMonth)
           .eq('year', selectedYear)
           .eq('branch_id', selectedBranch);
+
+        if (fetchError) {
+          console.error('BULK SUBMIT: Fetch Error:', fetchError);
+          throw fetchError;
+        }
 
         const finalPayload = payload.map(p => {
           const match = existingRecords?.find(er => er.unit_name === p.unit_name);
@@ -371,7 +553,9 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
           return p;
         });
 
+        console.log('BULK SUBMIT: Upserting records...', finalPayload.length);
         const { error } = await supabase.from('sales_data').upsert(finalPayload);
+        console.log('BULK SUBMIT: Upsert result:', { error });
         if (error) throw error;
       }
 
@@ -380,10 +564,16 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
       setBulkMonth('');
       setBulkCustomer('');
       setBulkTargets({});
-      fetchExistingData();
+      await fetchExistingData();
     } catch (error: any) {
-      toast.error('Bulk save failed: ' + error.message);
+      console.error('Bulk Save Error Details:', error);
+      let errorMsg = error.message;
+      if (error.code === '42501') {
+        errorMsg = 'Permission Denied (RLS). You cannot perform bulk entry.';
+      }
+      toast.error('Bulk save failed: ' + errorMsg);
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   };
@@ -416,222 +606,280 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
           animation: scaleIn 0.2s ease-out forwards;
         }
       `}} />
-      <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-4 bg-card p-2 md:p-3 rounded-xl shadow-sm border border-border">
-        <div className="flex items-center gap-2 overflow-x-auto flex-nowrap custom-scrollbar pb-2 lg:pb-0 scroll-smooth">
-          <div className="min-w-max pr-3 mr-1 border-r border-border flex flex-col justify-center">
-            <h2 className="text-[10px] md:text-xs lg:text-sm font-black uppercase tracking-tight leading-none text-primary whitespace-nowrap">
-              {view === 'planning' ? 'Target Planning' : 'Actual Sales Entry'}
-            </h2>
-            <p className="text-[8px] md:text-[9px] text-muted-foreground font-bold uppercase tracking-tighter whitespace-nowrap">Branch Name: {selectedBranch}</p>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <div className="flex items-center gap-1 bg-secondary/20 h-8 px-2 rounded-lg border border-border">
-              <span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground mr-1">Branch Name</span>
-              <Select value={selectedBranch || ''} onValueChange={setSelectedBranch}>
-                <SelectTrigger className="w-[110px] md:w-[130px] h-6 font-black text-[10px] border-none bg-background shadow-sm rounded-md">
-                  <SelectValue placeholder="Branch Name" />
+      <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-end gap-6 bg-card/50 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-border/50">
+        <div className="flex flex-wrap items-end gap-6">
+          <div className="flex flex-col gap-2.5">
+            <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-primary/70 ml-1">Branch Context</Label>
+            <div className="flex items-center gap-2">
+              <Select value={selectedBranch || ''} onValueChange={setSelectedBranch} disabled={loading}>
+                <SelectTrigger className="w-full md:min-w-[180px] h-11 font-black text-xs border-none bg-secondary/50 shadow-none rounded-xl hover:bg-secondary/80 focus:ring-2 focus:ring-primary/20 transition-all uppercase italic tracking-tighter">
+                  <SelectValue placeholder="Branch" />
                 </SelectTrigger>
                 <SelectContent>
                   {availableBranches.map(b => (
-                    <SelectItem key={b} value={b} className="font-bold text-[10px]">{b}</SelectItem>
+                    <SelectItem key={b} value={b} className="font-bold text-[10px] uppercase">
+                      {b === 'All' ? '🏢 All Branches' : b}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={fetchExistingData} 
+                disabled={loading}
+                className="h-11 w-11 rounded-xl hover:bg-primary/10 text-primary bg-primary/5 shrink-0"
+                title="Refresh Data"
+              >
+                <Loader2 size={16} className={loading ? 'animate-spin' : ''} />
+              </Button>
+            </div>
+          </div>
+          
+          {(profile?.role === 'Admin' || profile?.role === 'Branch Head') && (
+            <div className="flex flex-col gap-2.5">
+              <div className="flex items-center justify-between ml-1">
+                <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-primary/70">Personnel</Label>
+                {selectedSalesperson !== 'All' && (
+                  <span className="text-[8px] font-bold text-accent uppercase animate-pulse">Filtering Active</span>
+                )}
+              </div>
+              <Select value={selectedSalesperson} onValueChange={setSelectedSalesperson} disabled={loading}>
+                <SelectTrigger className="w-full md:min-w-[200px] h-11 font-black text-xs border-none bg-primary/5 shadow-none rounded-xl text-primary hover:bg-primary/10 focus:ring-2 focus:ring-primary/20 transition-all uppercase italic tracking-tighter">
+                  <SelectValue placeholder="All Employees">
+                    {selectedSalesperson === 'All' ? '👥 ALL EMPLOYEES' : (salespeople.find(p => p.id === selectedSalesperson)?.full_name || '👥 ALL EMPLOYEES')}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All" className="font-black text-xs uppercase italic tracking-tighter text-primary">👥 ALL EMPLOYEES</SelectItem>
+                  {salespeople.map(p => (
+                    <SelectItem key={p.id} value={p.id} className="font-bold text-[10px] uppercase tracking-tighter">{p.full_name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            {(profile?.role === 'Admin' || profile?.role === 'Branch Head') && (
-              <div className="flex items-center gap-1 bg-primary/5 h-8 px-2 rounded-lg border border-primary/20">
-                <span className="text-[8px] font-black uppercase tracking-widest text-primary mr-1">Employee Name</span>
-                <Select value={selectedSalesperson} onValueChange={setSelectedSalesperson}>
-                  <SelectTrigger className="w-[130px] md:w-[160px] h-6 font-black text-[10px] border-none bg-background shadow-sm rounded-md text-primary">
-                    <SelectValue placeholder="Select Employee">
-                      {selectedSalesperson === 'All' ? 'All Employees' : (salespeople.find(p => p.id === selectedSalesperson)?.full_name || 'Select Employee')}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="All" className="font-bold text-[10px]">All Employees</SelectItem>
-                    {salespeople.map(p => (
-                      <SelectItem key={p.id} value={p.id} className="font-bold text-[10px]">{p.full_name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            <div className="flex items-center gap-1 bg-secondary/20 h-8 px-2 rounded-lg border border-border">
-              <span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground">Yr</span>
-              <Select value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(parseInt(v))}>
-                <SelectTrigger className="w-[60px] md:w-[80px] h-6 font-black text-[10px] border-none bg-background shadow-sm rounded-md">
+          )}
+          
+          <div className="flex flex-col gap-2.5">
+            <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/70 ml-1">Period</Label>
+            <div className="flex items-center gap-2">
+              <Select value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(parseInt(v))} disabled={loading}>
+                <SelectTrigger className="w-full md:min-w-[100px] h-11 font-black text-xs border-none bg-secondary/50 shadow-none rounded-xl hover:bg-secondary/80 focus:ring-2 focus:ring-primary/20 transition-all">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {years.map(y => <SelectItem key={y} value={y.toString()} className="font-bold text-[10px]">{y}</SelectItem>)}
+                  {years.map(y => <SelectItem key={y} value={y.toString()} className="font-bold text-[10px]">📅 {y}</SelectItem>)}
                 </SelectContent>
               </Select>
-            </div>
-            <div className="flex items-center gap-1 bg-secondary/20 h-8 px-2 rounded-lg border border-border">
-              <span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground">Mo</span>
-              <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-                <SelectTrigger className="w-[90px] md:w-[110px] h-6 font-black text-[10px] border-none bg-background shadow-sm rounded-md">
+              
+              <Select value={selectedMonth} onValueChange={setSelectedMonth} disabled={loading}>
+                <SelectTrigger className="w-full md:min-w-[130px] h-11 font-black text-xs border-none bg-secondary/50 shadow-none rounded-xl hover:bg-secondary/80 focus:ring-2 focus:ring-primary/20 transition-all uppercase italic tracking-tighter">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="All" className="font-bold text-[10px]">All</SelectItem>
-                  {MONTHS.map(m => <SelectItem key={m} value={m} className="font-bold text-[10px]">{m}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-center gap-1 bg-secondary/20 h-8 px-2 rounded-lg border border-border">
-              <span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground">Ut</span>
-              <Select value={selectedUnit} onValueChange={setSelectedUnit}>
-                <SelectTrigger className="w-[90px] md:w-[110px] h-6 font-black text-[10px] border-none bg-background shadow-sm rounded-md">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="All" className="font-bold text-[10px]">All</SelectItem>
-                  {UNITS.map(u => <SelectItem key={u} value={u} className="font-bold text-[10px]">{u}</SelectItem>)}
+                  <SelectItem value="All" className="font-black text-xs uppercase italic tracking-tighter">🗓️ ALL MONTHS</SelectItem>
+                  {MONTHS.map(m => <SelectItem key={m} value={m} className="font-bold text-[10px] uppercase tracking-tighter">{m}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
           </div>
+          
+          <div className="flex flex-col gap-2.5">
+            <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/70 ml-1">Business Unit</Label>
+            <Select value={selectedUnit} onValueChange={setSelectedUnit} disabled={loading}>
+              <SelectTrigger className="w-full md:min-w-[140px] h-11 font-black text-xs border-none bg-secondary/50 shadow-none rounded-xl hover:bg-secondary/80 focus:ring-2 focus:ring-primary/20 transition-all uppercase italic tracking-tighter">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All" className="font-black text-xs uppercase italic tracking-tighter">📦 ALL UNITS</SelectItem>
+                {UNITS.map(u => <SelectItem key={u} value={u} className="font-bold text-[10px] uppercase tracking-tighter">{u}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-        <div className="flex gap-2 w-full lg:w-auto justify-end">
+
+        <div className="flex items-center gap-3 shrink-0">
           {view === 'planning' && (
-            <div className="flex gap-2 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0 custom-scrollbar">
-              <Button variant="outline" size="sm" onClick={() => setIsBulkOpen(true)} className="shrink-0 font-bold rounded-lg border-primary/20 hover:bg-primary/5 text-primary text-[10px] h-8 px-2 md:px-3">
-                <ClipboardList size={12} className="mr-1.5" />
-                Bulk
+            <>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setIsBulkOpen(true)} 
+                disabled={loading || selectedSalesperson === 'All' || selectedBranch === 'All'}
+                className="h-11 px-6 rounded-xl border-dashed border-primary/30 text-primary font-black text-[10px] uppercase tracking-widest hover:bg-primary/5 hover:border-primary transition-all disabled:opacity-20"
+              >
+                <ClipboardList size={14} className="mr-2" />
+                Bulk Entry
               </Button>
-              <Button variant="outline" size="sm" onClick={addRow} className="shrink-0 font-bold rounded-lg border-primary/20 hover:bg-primary/5 text-primary text-[10px] h-8 px-2 md:px-3">
-                <Plus size={12} className="mr-1.5" />
-                Row
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={addRow} 
+                disabled={loading || selectedSalesperson === 'All' || selectedBranch === 'All'}
+                className="h-11 px-6 rounded-xl border-dashed border-primary/30 text-primary font-black text-[10px] uppercase tracking-widest hover:bg-primary/5 hover:border-primary transition-all disabled:opacity-20"
+              >
+                <Plus size={14} className="mr-2" />
+                Add Row
               </Button>
-            </div>
+            </>
           )}
-          <Button onClick={handleSubmit} size="sm" disabled={loading} className="font-black rounded-lg px-4 md:px-6 bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 text-[10px] h-8">
-            {loading ? <Loader2 size={12} className="mr-1.5 animate-spin" /> : <Save size={12} className="mr-1.5" />}
-            {view === 'planning' ? 'Submit' : 'Save'}
+          <Button 
+            onClick={handleSubmit} 
+            disabled={loading || selectedBranch === 'All'} 
+            className="h-11 px-8 rounded-xl bg-primary shadow-lg shadow-primary/20 font-black text-[10px] uppercase tracking-[0.2em] hover:shadow-primary/40 active:scale-95 transition-all text-primary-foreground disabled:opacity-50"
+          >
+            {loading ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Save size={16} className="mr-2" />}
+            {view === 'planning' ? 'Save Planning' : 'Update Actuals'}
           </Button>
         </div>
       </div>
 
-      {/* Bulk Modal Implementation - Simpler version to avoid hook issues */}
+      {/* Bulk Modal Implementation */}
       {isBulkOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-card w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-2xl border border-border shadow-2xl flex flex-col scale-in-center">
-            <div className="p-6 border-b border-border flex justify-between items-center bg-secondary/10">
-              <h2 className="text-xl font-black uppercase tracking-tight">Bulk Target Entry</h2>
-              <Button variant="ghost" size="icon" onClick={() => setIsBulkOpen(false)} className="rounded-full hover:bg-destructive/10 hover:text-destructive">
-                <X size={18} />
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
+          <div className="bg-card w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-3xl border border-border shadow-2xl flex flex-col scale-in-center">
+            <div className="p-8 border-b border-border flex justify-between items-center bg-secondary/10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
+                  <Plus className="w-6 h-6" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-black uppercase tracking-tight leading-none text-foreground">Bulk Target Entry</h2>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mt-1.5 opacity-70">Add targets for multiple units at once</p>
+                </div>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setIsBulkOpen(false)} className="rounded-full hover:bg-destructive/10 hover:text-destructive w-10 h-10 transition-colors">
+                <X size={20} />
               </Button>
             </div>
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground ml-1">Select Month</Label>
-                  <Select value={bulkMonth} onValueChange={setBulkMonth}>
-                    <SelectTrigger className="h-12 bg-secondary/20 border-border rounded-xl shadow-none font-bold">
+            <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar bg-card/50">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="space-y-3">
+                  <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground ml-1">Select Month</Label>
+                  <Select value={bulkMonth} onValueChange={setBulkMonth} disabled={loading}>
+                    <SelectTrigger className="h-12 bg-secondary/30 border-none shadow-none focus:ring-2 focus:ring-primary/20 rounded-2xl font-black text-xs ring-offset-0 disabled:opacity-50 uppercase italic tracking-tighter">
                       <SelectValue placeholder="Select Month" />
                     </SelectTrigger>
                     <SelectContent>
-                      {MONTHS.map(m => <SelectItem key={m} value={m} className="font-bold">{m}</SelectItem>)}
+                      {MONTHS.map(m => <SelectItem key={m} value={m} className="font-bold uppercase text-[10px]">{m}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground ml-1">Customer Name</Label>
+                <div className="space-y-3">
+                  <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground ml-1">Customer Name</Label>
                   <Input 
-                    placeholder="Enter Customer Name" 
+                    placeholder="ENTER CUSTOMER NAME..." 
                     value={bulkCustomer}
                     onChange={(e) => setBulkCustomer(e.target.value)}
-                    className="h-12 bg-secondary/20 border-border rounded-xl shadow-none font-bold"
+                    disabled={loading}
+                    className="h-12 bg-secondary/30 border-none shadow-none focus:ring-2 focus:ring-primary/20 rounded-2xl font-black text-xs px-4 placeholder:text-muted-foreground/30 ring-offset-0 disabled:opacity-50"
                   />
                 </div>
               </div>
               
-              <div className="space-y-4">
-                <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground ml-1">Enter Targets for Units</Label>
-                <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-6">
+                <div className="flex items-center gap-4">
+                   <div className="h-[1px] flex-1 bg-border" />
+                   <Label className="text-[10px] font-black uppercase tracking-[0.3em] text-primary whitespace-nowrap">Target Amounts for Units</Label>
+                   <div className="h-[1px] flex-1 bg-border" />
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {UNITS.map(unit => (
-                    <div key={unit} className="flex items-center justify-between gap-4 bg-secondary/10 p-3 rounded-xl border border-border/50 group hover:border-primary/50 transition-colors">
-                      <span className="text-xs font-black uppercase tracking-tighter text-foreground group-hover:text-primary transition-colors">{unit}</span>
-                      <Input 
-                        type="number"
-                        placeholder="0"
-                        value={bulkTargets[unit] || ''}
-                        onChange={(e) => setBulkTargets({...bulkTargets, [unit]: e.target.value})}
-                        className="w-28 h-9 text-right font-black text-xs bg-background border-border rounded-lg shadow-sm"
-                      />
+                    <div key={unit} className="flex items-center justify-between gap-4 bg-secondary/20 p-4 rounded-2xl border border-border/50 group hover:border-primary/50 transition-all hover:bg-secondary/40">
+                      <span className="text-xs font-black uppercase tracking-tighter text-muted-foreground group-hover:text-primary transition-colors">{unit}</span>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-muted-foreground/50">₹</span>
+                        <Input 
+                          type="number"
+                          placeholder="0"
+                          value={bulkTargets[unit] || ''}
+                          onChange={(e) => setBulkTargets({...bulkTargets, [unit]: e.target.value})}
+                          disabled={loading}
+                          className="w-32 h-10 text-right font-black text-sm bg-background border-none shadow-sm rounded-xl focus-visible:ring-2 focus-visible:ring-primary/20 pr-4 pl-7 disabled:opacity-50"
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>
               </div>
             </div>
-            <div className="p-6 border-t border-border flex justify-end gap-3 bg-secondary/5">
-              <Button variant="ghost" onClick={() => setIsBulkOpen(false)} className="font-bold text-xs uppercase tracking-widest h-11 px-8 rounded-xl hover:bg-secondary/80">Cancel</Button>
-              <Button onClick={handleBulkSubmit} disabled={loading} className="font-black text-xs uppercase tracking-widest h-11 px-10 rounded-xl bg-primary shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all active:scale-[0.98]">
-                {loading ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Save size={16} className="mr-2" />}
-                Save Bulk Plan
+            <div className="p-8 border-t border-border flex flex-col sm:flex-row justify-end gap-3 bg-secondary/10">
+              <Button variant="ghost" onClick={() => setIsBulkOpen(false)} className="font-bold text-xs uppercase tracking-widest h-12 px-10 rounded-2xl hover:bg-secondary/80 transition-colors">Cancel</Button>
+              <Button onClick={handleBulkSubmit} disabled={loading} className="font-black text-xs uppercase tracking-widest h-12 px-12 rounded-2xl bg-primary shadow-xl shadow-primary/20 hover:shadow-primary/40 transition-all active:scale-[0.98] disabled:opacity-50">
+                {loading ? <Loader2 size={18} className="mr-2 animate-spin" /> : <Save size={18} className="mr-2" />}
+                Confirm & Create Plan
               </Button>
             </div>
           </div>
         </div>
       )}
 
-      <div className="overflow-x-auto w-full rounded-xl border border-border shadow-md bg-card relative custom-scrollbar">
+      <div className="overflow-x-auto w-full rounded-2xl border border-border/50 shadow-2xl bg-card relative custom-scrollbar max-h-[70vh]">
         <table className="w-full border-separate border-spacing-0 table-auto min-w-max lg:min-w-full">
-          <thead>
-            <tr className="bg-secondary">
-              <th className={`${isAllMonths ? 'sticky lg:sticky left-0 z-30' : ''} bg-secondary p-1.5 text-left border-r border-b border-border min-w-[30px] md:min-w-[40px] font-black uppercase text-[9px] tracking-widest text-foreground h-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>Sr.</th>
-              <th className={`${isAllMonths ? 'sticky lg:sticky left-[30px] md:left-[40px] z-30' : ''} bg-secondary p-1.5 text-left border-r border-b border-border min-w-[150px] md:min-w-[220px] font-black uppercase text-[9px] tracking-widest text-foreground h-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>Customer Name</th>
-              <th className={`${isAllMonths ? 'hidden lg:table-cell lg:sticky lg:left-[260px] z-30' : ''} bg-secondary p-1.5 text-left border-r border-b border-border min-w-[120px] md:min-w-[150px] font-black uppercase text-[9px] tracking-widest text-foreground h-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>Unit</th>
-              <th colSpan={displayMonths.length} className="p-1 text-center border-b border-border bg-primary/5 font-black uppercase text-[9px] tracking-widest text-primary h-10 z-10">
-                Target & Actual (AMT)
-              </th>
-            </tr>
-            <tr className="bg-secondary/80 backdrop-blur-sm">
-              <th className={`${isAllMonths ? 'sticky lg:sticky left-0 z-30' : ''} bg-secondary border-r border-b border-border h-6 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}></th>
-              <th className={`${isAllMonths ? 'sticky lg:sticky left-[30px] md:left-[40px] z-30' : ''} bg-secondary border-r border-b border-border h-6 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}></th>
-              <th className={`${isAllMonths ? 'hidden lg:table-cell lg:sticky lg:left-[260px] z-30' : ''} bg-secondary border-r border-b border-border h-6 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}></th>
+          <thead className="sticky top-0 z-40">
+            <tr className="bg-secondary/95 backdrop-blur-md">
+              <th className={`${isAllMonths ? 'sticky lg:sticky left-0 z-50' : ''} bg-secondary/95 p-3 text-left border-r border-b border-border/50 min-w-[40px] md:min-w-[50px] font-black uppercase text-[10px] tracking-widest text-foreground shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>Sr.</th>
+              <th className={`${isAllMonths ? 'sticky lg:sticky left-[40px] md:left-[50px] z-50' : ''} bg-secondary/95 p-3 text-left border-r border-b border-border/50 min-w-[180px] md:min-w-[260px] font-black uppercase text-[10px] tracking-widest text-foreground shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>Customer Name</th>
+              <th className={`${isAllMonths ? 'hidden lg:table-cell lg:sticky lg:left-[310px] z-50' : ''} bg-secondary/95 p-3 text-left border-r border-b border-border/50 min-w-[130px] md:min-w-[160px] font-black uppercase text-[10px] tracking-widest text-foreground shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>Unit</th>
               {displayShortMonths.map(m => (
-                <th key={m} className={`p-1 text-center text-[10px] font-black uppercase tracking-tighter border-r border-b border-border last:border-r-0 ${isAllMonths ? 'min-w-[160px]' : 'min-w-[200px]'} h-6 z-10 bg-secondary/50`}>
+                <th key={m} className={`p-3 text-center text-[11px] font-black uppercase tracking-tighter border-r border-b border-border/50 last:border-r-0 ${isAllMonths ? 'min-w-[170px]' : 'min-w-[220px]'} bg-primary/5 text-primary`}>
                   {m}
                 </th>
               ))}
+              <th className="bg-secondary/95 border-b border-border/50 w-12"></th>
             </tr>
           </thead>
           <tbody>
             {rows
               .filter(r => selectedUnit === 'All' || r.unit === selectedUnit)
               .map((row, idx) => (
-              <tr key={row.id} className="hover:bg-secondary/5 transition-colors h-12 group">
-                <td className={`${isAllMonths ? 'sticky lg:sticky left-0 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''} bg-card group-hover:bg-card px-2 py-1 text-center border-r border-b border-border font-bold text-[11px] text-muted-foreground transition-all min-w-[30px] md:min-w-[40px]`}>{idx + 1}</td>
-                <td className={`${isAllMonths ? 'sticky lg:sticky left-[30px] md:left-[40px] z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''} bg-card group-hover:bg-card px-1 py-1 border-r border-b border-border transition-all min-w-[150px] md:min-w-[220px]`}>
-                  <Input 
-                    value={row.customerName}
-                    onChange={(e) => updateRow(row.id, 'customerName', e.target.value)}
-                    placeholder="Customer"
-                    disabled={view === 'actuals'}
-                    className="border-none shadow-none focus-visible:ring-0 h-10 font-black text-xs bg-transparent"
-                  />
-                  {/* On mobile, show unit here if it's hidden from columns */}
-                  <div className="lg:hidden px-3 pb-1 -mt-2">
-                    <span className="text-[8px] font-black uppercase text-primary/60 bg-primary/5 px-1.5 py-0.5 rounded border border-primary/10">
-                      Unit: {row.unit || 'Not Set'}
-                    </span>
+              <tr key={row.id} className="hover:bg-primary/5 transition-all h-14 group">
+                <td className={`${isAllMonths ? 'sticky lg:sticky left-0 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''} bg-card group-hover:bg-accent/5 px-3 py-2 text-center border-r border-b border-border/30 font-black text-[12px] text-muted-foreground transition-all`}>{idx + 1}</td>
+                <td className={`${isAllMonths ? 'sticky lg:sticky left-[40px] md:left-[50px] z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''} bg-card group-hover:bg-accent/10 px-3 py-2 border-r border-b border-border/30 transition-all`}>
+                  <div className="flex flex-col gap-1.5">
+                    <Input 
+                      value={row.customerName}
+                      onChange={(e) => updateRow(row.id, 'customerName', e.target.value)}
+                      placeholder="CUSTOMER NAME..."
+                      disabled={view === 'actuals' || loading}
+                      className="border-none shadow-none focus-visible:ring-0 h-9 font-black text-[13px] bg-transparent disabled:opacity-50 px-1 uppercase tracking-tight placeholder:text-muted-foreground/20"
+                    />
+                    <div className="lg:hidden flex flex-wrap gap-1.5 px-1">
+                      <span className="text-[9px] font-black uppercase text-primary bg-primary/10 px-2 py-0.5 rounded-full border border-primary/20">
+                        {row.unit || 'NO UNIT'}
+                      </span>
+                      {selectedBranch === 'All' && (row as any).branchId && (
+                        <span className="text-[9px] font-black uppercase text-accent bg-accent/10 px-2 py-0.5 rounded-full border border-accent/20">
+                          🏢 {(row as any).branchId}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </td>
-                <td className={`${isAllMonths ? 'hidden lg:table-cell lg:sticky lg:left-[260px] z-20' : ''} bg-card group-hover:bg-card px-1 py-1 border-r border-b border-border transition-all min-w-[120px] md:min-w-[150px]`}>
-                  <Select 
-                    value={row.unit} 
-                    onValueChange={(v) => updateRow(row.id, 'unit', v)}
-                    disabled={view === 'actuals'}
-                  >
-                    <SelectTrigger className="border-none shadow-none focus:ring-0 h-10 font-bold text-xs bg-transparent">
-                      <SelectValue placeholder="Unit" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {UNITS.map(u => <SelectItem key={u} value={u} className="text-xs">{u}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                <td className={`${isAllMonths ? 'hidden lg:table-cell lg:sticky lg:left-[310px] z-20' : ''} bg-card group-hover:bg-accent/10 px-3 py-2 border-r border-b border-border/30 transition-all`}>
+                  <div className="flex flex-col gap-2">
+                    <Select 
+                      value={row.unit} 
+                      onValueChange={(v) => updateRow(row.id, 'unit', v)}
+                      disabled={view === 'actuals' || loading || selectedBranch === 'All'}
+                    >
+                      <SelectTrigger className="border-none shadow-none focus:ring-0 h-8 font-black text-[11px] bg-secondary/80 rounded-xl disabled:opacity-50 px-3 uppercase italic tracking-tighter hover:bg-secondary transition-colors">
+                        <SelectValue placeholder="UNIT" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {UNITS.map(u => <SelectItem key={u} value={u} className="text-[11px] font-black uppercase">{u}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    {selectedBranch === 'All' && (row as any).branchId && (
+                      <div className="flex items-center gap-1.5 px-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+                        <span className="text-[10px] font-black uppercase tracking-widest text-accent/80 truncate">
+                          {(row as any).branchId}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </td>
                 {displayMonths.map(m => {
                   const monthIdx = MONTHS.indexOf(m);
@@ -661,7 +909,8 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
                             type="number"
                             value={row.targets[m] || ''}
                             onChange={(e) => updateMonthlyValue(row.id, m, 'targets', parseFloat(e.target.value) || 0)}
-                            className="h-10 border-border/40 text-center font-black text-sm px-1 focus-visible:ring-primary/30"
+                            disabled={loading}
+                            className="h-10 border-border/40 text-center font-black text-sm px-1 focus-visible:ring-primary/30 disabled:opacity-50"
                           />
                         ) : (
                           <div className="space-y-1.5 py-1">
@@ -686,7 +935,8 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
                                   value={row.actuals[m] || ''}
                                   onChange={(e) => updateMonthlyValue(row.id, m, 'actuals', parseFloat(e.target.value) || 0)}
                                   placeholder="Enter Actual"
-                                  className="h-10 border-none shadow-none text-center font-black text-sm px-1 bg-transparent focus-visible:ring-0 flex-1 placeholder:text-muted-foreground/30 placeholder:font-normal"
+                                  disabled={loading}
+                                  className="h-10 border-none shadow-none text-center font-black text-sm px-1 bg-transparent focus-visible:ring-0 flex-1 placeholder:text-muted-foreground/30 placeholder:font-normal disabled:opacity-50"
                                 />
                               </div>
                               <div className={`min-w-[55px] text-right text-[10px] font-black leading-none flex flex-col items-end pt-1 ${diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -704,28 +954,28 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
                     </td>
                   );
                 })}
-                {view === 'planning' && rows.length > 1 && (
-                  <td className="p-1">
-                     <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        onClick={() => removeRow(row.id)}
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 size={12} />
-                      </Button>
-                  </td>
-                )}
+                <td className="p-1 px-2 border-b border-border text-center">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    onClick={() => handleDeleteRow(row)}
+                    disabled={loading}
+                    title="Delete row"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-full transition-colors"
+                  >
+                    <Trash2 size={14} />
+                  </Button>
+                </td>
               </tr>
             ))}
           </tbody>
           <tfoot className="sticky bottom-0 z-40 bg-muted/90 backdrop-blur-md">
             <tr className="h-12 border-t-2 border-border shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
-              <td colSpan={2} className={`${isAllMonths ? 'sticky lg:sticky left-0 z-50 min-w-[180px]' : ''} lg:hidden bg-muted px-4 py-2 text-right border-r border-border font-black uppercase text-[10px] tracking-widest text-foreground shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>
+              <td colSpan={2} className={`${isAllMonths ? 'sticky lg:sticky left-0 z-50 min-w-[220px]' : ''} lg:hidden bg-muted px-4 py-3 text-right border-r border-border/50 font-black uppercase text-[10px] tracking-widest text-foreground shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>
                 Total
               </td>
-              <td colSpan={3} className={`${isAllMonths ? 'sticky lg:sticky left-0 z-50 lg:min-w-[410px]' : ''} hidden lg:table-cell bg-muted px-4 py-2 text-right border-r border-border font-black uppercase text-[10px] tracking-widest text-foreground shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>
-                Grand Total
+              <td colSpan={3} className={`${isAllMonths ? 'sticky lg:sticky left-0 z-50 lg:min-w-[470px]' : ''} hidden lg:table-cell bg-muted px-4 py-3 text-right border-r border-border/50 font-black uppercase text-[10px] tracking-widest text-foreground shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>
+                Grand Total / Summary
               </td>
               {displayMonths.map(m => {
                 const filteredRows = rows.filter(r => selectedUnit === 'All' || r.unit === selectedUnit);
@@ -734,26 +984,26 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
                 const totalDiff = totalActual - totalTarget;
 
                 return (
-                  <td key={m} className="px-1 py-1 border-r border-border last:border-r-0 bg-muted/40">
-                        <div className="flex flex-col gap-1 justify-center h-full">
-                          <div className="space-y-1.5 py-1">
-                            <div className="flex items-center justify-between text-[10px] font-black px-2 text-muted-foreground bg-background/50 rounded-sm py-0.5 border border-border/10">
+                  <td key={m} className={`px-2 py-2 border-r border-border/50 last:border-r-0 ${totalDiff >= 0 ? 'bg-green-500/5' : 'bg-red-500/5'}`}>
+                        <div className="flex flex-col gap-2 justify-center h-full">
+                          <div className="space-y-2 py-1">
+                            <div className="flex items-center justify-between text-[10px] font-black px-2 text-muted-foreground bg-background/80 rounded-lg py-1 border border-border/20 shadow-sm">
                               <span>T-TOTAL</span>
                               <span className="text-foreground tracking-tighter">₹{totalTarget.toLocaleString()}</span>
                             </div>
                             {view === 'actuals' && (
-                              <div className="flex items-center justify-between px-2 h-8">
+                              <div className="flex items-center justify-between px-2 h-10 bg-background/40 rounded-lg border border-border/10">
                                 <div className="flex flex-col">
-                                  <span className="text-[10px] font-black text-muted-foreground leading-none">A-TOTAL</span>
-                                  <span className="text-sm font-black text-foreground tracking-tighter">₹{totalActual.toLocaleString()}</span>
+                                  <span className="text-[9px] font-black text-muted-foreground leading-none">A-TOTAL</span>
+                                  <span className="text-[13px] font-black text-foreground tracking-tighter">₹{totalActual.toLocaleString()}</span>
                                 </div>
                                 <div className={`text-right text-[10px] font-black leading-none flex flex-col items-end gap-1 ${totalDiff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                   {totalActual > 0 ? (
                                     <>
-                                      <span className="text-[14px] leading-none">{totalDiff >= 0 ? '▲' : '▼'}</span>
+                                      <span className="text-[12px] leading-none">{totalDiff >= 0 ? '▲' : '▼'}</span>
                                       <span className="tracking-tighter font-black">₹{Math.abs(totalDiff).toLocaleString()}</span>
                                     </>
-                                  ) : null}
+                                  ) : <span className="opacity-20 italic">0.00</span>}
                                 </div>
                               </div>
                             )}
@@ -762,7 +1012,7 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
                   </td>
                 );
               })}
-              {view === 'planning' && rows.length > 1 && <td className="bg-muted/40"></td>}
+              <td className="bg-muted/40"></td>
             </tr>
           </tfoot>
         </table>
@@ -770,7 +1020,12 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
 
       {view === 'planning' && (
         <div className="flex justify-center mt-4">
-           <Button variant="outline" onClick={addRow} className="w-full max-w-sm border-dashed border-2 hover:border-primary hover:bg-primary/5 font-black text-[10px] uppercase tracking-widest h-12 rounded-xl">
+           <Button 
+             variant="outline" 
+             onClick={addRow} 
+             disabled={loading || selectedBranch === 'All' || selectedSalesperson === 'All'}
+             className="w-full max-w-sm border-dashed border-2 hover:border-primary hover:bg-primary/5 font-black text-[10px] uppercase tracking-widest h-12 rounded-xl disabled:opacity-30"
+           >
              <Plus size={16} className="mr-2" />
              Add Another Row
            </Button>

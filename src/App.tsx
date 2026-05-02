@@ -68,57 +68,42 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [loading]);
 
-  const fetchProfile = useCallback(async (userId: string) => {
+  const fetchProfile = useCallback(async (userId: string, email?: string) => {
     if (fetchingRef.current === userId) return;
     fetchingRef.current = userId;
     
-    console.log('--- fetchProfile START for', userId);
+    console.log('--- fetchProfile START for', email || userId);
     try {
-      // Get session email for logging
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
-      console.log('--- Auth Email:', currentSession?.user?.email);
-
-      // Add a race here too just in case the profile query hangs
-      const profilePromise = supabase
+      // Fetch profile from database
+      const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .maybeSingle();
-      
-      const profileTimeout = new Promise<{data: null, error: Error}>((_, reject) => 
-        setTimeout(() => reject(new Error('Profile fetch timed out')), 30000)
-      );
-
-      const { data, error } = await (Promise.race([profilePromise, profileTimeout]) as any);
 
       if (error) {
         console.warn('Profile fetch warning:', error);
       }
       
       if (data) {
-        console.log('--- profile FOUND:', data.full_name);
+        console.log('--- profile FOUND:', data.full_name, 'Role:', data.role);
         setProfile(data);
       } else {
-        console.log('--- no profile record found yet, using session metadata');
-        // If we have a session, we can extract the metadata from it
-        supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
-          if (currentSession?.user) {
-            const metadata = currentSession.user.user_metadata;
-            setProfile({
-              id: currentSession.user.id,
-              email: currentSession.user.email || '',
-              role: metadata.role || 'Sales Person',
-              full_name: metadata.full_name || currentSession.user.email?.split('@')[0],
-              branch_ids: metadata.branch_ids || []
-            });
-          }
-        });
+        console.log('--- no profile record found yet, using session metadata if available');
+        const { data: sessData } = await supabase.auth.getSession();
+        const user = sessData.session?.user;
+        if (user) {
+          const metadata = user.user_metadata;
+          setProfile({
+            full_name: metadata.full_name || user.email?.split('@')[0] || 'Personnel',
+            branch_ids: metadata.branch_ids || []
+          });
+        }
       }
     } catch (error) {
       console.error('CRITICAL Error in fetchProfile:', error);
     } finally {
       fetchingRef.current = null;
-      console.log('--- fetchProfile FINISHED, setting loading=false');
       setLoading(false);
     }
   }, []);
@@ -140,37 +125,25 @@ export default function App() {
       console.log('INITIALIZE: Step 1 (Auth Check)');
       
       try {
-        // Start getSession but don't wait indefinitely if onAuthStateChange can trigger faster
-        const sessionPromise = supabase.auth.getSession().catch(e => ({ data: { session: null }, error: e }));
-        
-        const timeoutPromise = new Promise<{data: {session: any}, error: Error | null}>((resolve) => 
-          setTimeout(() => {
-            console.warn('Auth session check timed out, relying on onAuthStateChange or manual login');
-            resolve({ data: { session: null }, error: null });
-          }, 5000) // 5s is plenty for a local check
-        );
-
-        const result = await (Promise.race([sessionPromise, timeoutPromise]) as any);
-        const initialSession = result?.data?.session;
+        // Get current session once
+        const { data: { session: initialSession }, error: sessionError } = await supabase.auth.getSession();
         
         if (!mounted) return;
 
         if (initialSession) {
           console.log('INITIALIZE: Step 2 (Session Found via getSession)');
           setSession(initialSession);
-          await fetchProfile(initialSession.user.id);
+          await fetchProfile(initialSession.user.id, initialSession.user.email);
         } else {
+          console.log('INITIALIZE: Step 2 (No session from getSession, waiting for auth listener)');
           // If no session from getSession, check if we're already loading via onAuthStateChange
-          if (!session && loading) {
-            console.log('INITIALIZE: Step 2 (No session from getSession, waiting for auth listener)');
-            // We give it a bit more time for the listener, otherwise we stop loading
-            setTimeout(() => {
-              if (mounted && loading && !session) {
-                console.log('INITIALIZE: Step 3 (Final fallback - no user detected)');
-                setLoading(false);
-              }
-            }, 2000);
-          }
+          // We give it a bit more time for the listener, otherwise we stop loading
+          setTimeout(() => {
+            if (mounted && loading && !session) {
+              console.log('INITIALIZE: Step 3 (Final fallback - no user detected)');
+              setLoading(false);
+            }
+          }, 2000);
         }
       } catch (err) {
         console.error('INITIALIZE: Error:', err);
@@ -180,19 +153,20 @@ export default function App() {
 
     initAuth();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
+      console.log('--- AUTH EVENT:', event, currentSession?.user?.email);
       if (!mounted) return;
       
-      setSession(prev => {
-        if (JSON.stringify(prev) === JSON.stringify(session)) return prev;
-        return session;
-      });
-
-      if (session) {
-        await fetchProfile(session.user.id);
-      } else {
+      if (event === 'SIGNED_OUT') {
+        setSession(null);
         setProfile(null);
         setLoading(false);
+        fetchingRef.current = null;
+      } else if (currentSession) {
+        setSession(currentSession);
+        if (currentSession.user?.id) {
+          await fetchProfile(currentSession.user.id, currentSession.user.email);
+        }
       }
     });
 
@@ -205,11 +179,7 @@ export default function App() {
   const handleLogout = async () => {
     try {
       setLoading(true);
-      // Force clear state immediately to avoid flickers
-      setSession(null);
-      setProfile(null);
-      setActiveTab('dashboard');
-      setDrillDownEmployeeId(null);
+      console.log('--- LOGOUT INITIATED ---');
       
       // Specifically clear storage to be extra sure
       if (typeof window !== 'undefined') {
@@ -217,27 +187,31 @@ export default function App() {
         localStorage.clear();
         sessionStorage.clear();
         
-        // Find and remove any supabase specific keys specifically if clear() was blocked
-        Object.keys(localStorage).forEach(key => {
-          if (key.includes('supabase.auth.token')) localStorage.removeItem(key);
-        });
+        // Clear all cookies (best effort)
+        const cookies = document.cookie.split(";");
+        for (let i = 0; i < cookies.length; i++) {
+          const cookie = cookies[i];
+          const eqPos = cookie.indexOf("=");
+          const name = eqPos > -1 ? cookie.substr(0, eqPos) : cookie;
+          document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
+        }
       }
       
       // Attempt sign out from Supabase
-      await supabase.auth.signOut({ scope: 'local' }).catch(err => console.warn('SignOut error ignored:', err));
+      await supabase.auth.signOut({ scope: 'global' }).catch(err => console.warn('SignOut error ignored:', err));
+      
+      setSession(null);
+      setProfile(null);
       
       toast.success('Logged out successfully');
       
       // Force a clean state reload to ensure no memory residue
-      window.location.href = window.location.origin;
+      setTimeout(() => {
+        window.location.href = window.location.origin;
+      }, 500);
     } catch (err: any) {
       console.error('Logout error:', err);
-      setSession(null);
-      setProfile(null);
       window.location.reload();
-    } finally {
-      setLoading(false);
-      setIsSidebarOpen(false);
     }
   };
 
@@ -332,7 +306,7 @@ export default function App() {
             </ul>
           </div>
           <p className="text-xs text-muted-foreground italic mb-6">
-            Tip: Only Supabase credentials are required. Google Sheets integration has been removed as requested.
+            Tip: Ensure your Supabase project is active and the URL matches your project dashboard.
           </p>
           <Button 
             onClick={() => window.location.reload()} 
@@ -449,16 +423,26 @@ export default function App() {
           </ul>
         </nav>
 
-        <div className="mt-auto pt-6 border-t border-sidebar-border flex items-center gap-3">
-          <div className="w-9 h-9 bg-primary rounded-full flex items-center justify-center font-bold text-sm text-primary-foreground shadow-lg shadow-primary/20">
-            {profile?.full_name?.split(' ').map(n => n[0]).join('') || 'U'}
+        <div className="mt-auto pt-6 border-t border-sidebar-border flex flex-col gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 bg-primary rounded-full flex items-center justify-center font-bold text-sm text-primary-foreground shadow-lg shadow-primary/20">
+              {profile?.full_name?.split(' ').map(n => n[0]).join('') || 'U'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold truncate">{profile?.full_name || 'User'}</p>
+              <p className="text-[10px] opacity-60 truncate uppercase tracking-widest font-bold">{profile?.role}</p>
+            </div>
+            <Button variant="ghost" size="icon" onClick={handleLogout} className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-xl">
+              <LogOut size={16} />
+            </Button>
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold truncate">{profile?.full_name || 'User'}</p>
-            <p className="text-[10px] opacity-60 truncate uppercase tracking-widest font-bold">{profile?.role}</p>
-          </div>
-          <Button variant="ghost" size="icon" onClick={handleLogout} className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-xl">
-            <LogOut size={16} />
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => window.location.reload()} 
+            className="w-full text-[9px] font-bold uppercase tracking-widest text-sidebar-foreground/40 hover:text-sidebar-foreground hover:bg-sidebar-accent/50 h-8 rounded-lg"
+          >
+            Hard Refresh App
           </Button>
         </div>
       </aside>

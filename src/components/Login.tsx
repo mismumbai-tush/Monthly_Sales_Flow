@@ -4,22 +4,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
-import { Mail, Lock, LayoutDashboard, User, Building2, ChevronDown } from 'lucide-react';
+import { Mail, Lock, X, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
-import { BRANCHES } from '@/src/constants';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Check, X } from 'lucide-react';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [role, setRole] = useState<'Sales Person' | 'Branch Head' | 'Admin'>('Sales Person');
-  const [selectedBranches, setSelectedBranches] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  const [isSignUp, setIsSignUp] = useState(false);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,103 +21,49 @@ export default function Login() {
         throw new Error('Database is not configured. Please add SUPABASE_URL and SUPABASE_ANON_KEY to your secrets.');
       }
 
-      if (!isSignUp) {
-        console.log('Clearing any existing stale session before login...');
-        await supabase.auth.signOut().catch(() => {});
-        if (typeof window !== 'undefined') {
-          sessionStorage.clear();
-        }
+      // Ensure a clean start for the new auth attempt
+      if (typeof window !== 'undefined') {
+        console.log('--- PREPARING AUTH ---');
       }
 
-      if (isSignUp) {
-        if (!firstName || !lastName) throw new Error('First and Last name are required');
-        if (role !== 'Admin' && selectedBranches.length === 0) throw new Error('Please select at least one branch');
+      console.log('Attempting sign in for:', email);
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      
+      if (error) {
+        if (error.message.includes('Email not confirmed')) {
+          throw new Error('Your email has not been confirmed yet. Please check your inbox for the verification link.');
+        }
+        throw error;
+      }
 
-        const fullName = `${firstName} ${lastName}`;
-        console.log('Attempting sign up for:', email, 'Role:', role);
-        
-        const { data, error: signUpError } = await supabase.auth.signUp({ 
-          email, 
-          password,
-          options: {
-            data: {
-              full_name: fullName,
-              role: role,
-              branch_ids: role === 'Admin' ? [] : selectedBranches
-            }
-          }
-        });
-        
-        if (signUpError) throw signUpError;
-        
-        console.log('Sign up result:', data);
+      if (data.user) {
+        // Check if profile exists, if not create it (safe fallback for existing users)
+        const { data: existingProfile, error: fetchError } = await supabase
+          .from('profiles')
+          .select('id, role')
+          .eq('id', data.user.id)
+          .maybeSingle();
 
-        if (data.user && data.session) {
-          // If auto-confirm is on, we can create the profile record immediately
-          console.log('Session available, creating profile record...');
-          const { error: profileError } = await supabase
+        if (fetchError) {
+          console.error('Error checking existing profile:', fetchError);
+        }
+
+        if (!existingProfile) {
+          console.log('Profile missing on login, initializing as Sales Person...');
+          await supabase
             .from('profiles')
             .upsert({
               id: data.user.id,
               email: email,
-              role: role,
-              full_name: fullName,
-              branch_ids: role === 'Admin' ? [] : selectedBranches
+              role: data.user.user_metadata?.role || 'Sales Person',
+              full_name: data.user.user_metadata?.full_name || email.split('@')[0],
+              branch_ids: data.user.user_metadata?.branch_ids || [],
+              updated_at: new Date().toISOString()
             });
-          
-          if (profileError) {
-            console.error('Profile creation error:', profileError);
-            // Don't throw here as the user is still logged in to Auth
-            toast.warning('Account created, but profile initialization failed. Please contact support.');
-          } else {
-            toast.success('Successfully signed up and logged in!');
-          }
-        } else if (data.user && !data.session) {
-          // Email confirmation required
-          console.log('No session returned - email verification likely required');
-          toast.success('Sign up successful! IMPORTANT: A verification email has been sent to ' + email + '. You MUST confirm your email before you can log in.', {
-            duration: 10000,
-          });
-          setIsSignUp(false);
-        } else {
-          toast.success('Account created successfully!');
-          setIsSignUp(false);
         }
-      } else {
-        console.log('Attempting sign in for:', email);
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-        
-        if (error) {
-          if (error.message.includes('Email not confirmed')) {
-            throw new Error('Your email has not been confirmed yet. Please check your inbox for the verification link.');
-          }
-          throw error;
-        }
-
-        if (data.user) {
-          // Check if profile exists, if not create it (safe fallback for users who didn't get a profile on signup)
-          const { data: existingProfile } = await supabase
-            .from('profiles')
-            .select('id')
-            .eq('id', data.user.id)
-            .maybeSingle();
-
-          if (!existingProfile) {
-            console.log('Profile missing on login, creating...');
-            await supabase
-              .from('profiles')
-              .insert({
-                id: data.user.id,
-                email: email,
-                role: data.user.user_metadata?.role || 'Sales Person',
-                full_name: data.user.user_metadata?.full_name || email.split('@')[0],
-                branch_ids: data.user.user_metadata?.branch_ids || []
-              });
-          }
-        }
-        
-        toast.success('Logged in successfully');
       }
+      
+      toast.success('Logged in successfully');
     } catch (error: any) {
       console.error('Auth handler error:', error);
       toast.error(error.message || 'An unexpected error occurred', {
@@ -134,17 +71,6 @@ export default function Login() {
       });
     } finally {
       setLoading(false);
-    }
-  };
-
-  const toggleBranch = (branch: string) => {
-    console.log('Toggling branch:', branch, 'for role:', role);
-    if (role === 'Sales Person') {
-      setSelectedBranches([branch]);
-    } else {
-      setSelectedBranches(prev => 
-        prev.includes(branch) ? prev.filter(b => b !== branch) : [...prev, branch]
-      );
     }
   };
 
@@ -161,48 +87,18 @@ export default function Login() {
             />
           </div>
           <CardTitle className="text-xl md:text-2xl lg:text-3xl font-black tracking-tighter text-foreground flex flex-col items-center gap-1">
-            <span className="text-primary italic">SalesPulse</span>
-            <span className="text-[10px] md:text-sm font-bold uppercase tracking-[0.2em] text-muted-foreground/60">Ginza Industries Ltd</span>
+            <div className="flex items-center gap-2 text-primary italic">
+              <ShieldCheck className="h-6 w-6" />
+              <span>SalesPulse</span>
+            </div>
+            <span className="text-[10px] md:text-sm font-bold uppercase tracking-[0.2em] text-muted-foreground/60">Professional Portal</span>
           </CardTitle>
           <CardDescription className="text-xs md:text-sm text-muted-foreground font-medium px-4">
-            {isSignUp ? 'Create your professional account' : 'Access your SalesPulse dashboard'}
+            Access your SalesPulse dashboard
           </CardDescription>
         </CardHeader>
         <CardContent className="p-5 md:p-8 space-y-6">
           <form onSubmit={handleAuth} className="space-y-4">
-            {isSignUp && (
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="firstName" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">First Name</Label>
-                  <div className="relative">
-                    <User className="absolute left-3.5 top-3.5 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="firstName"
-                      placeholder="John"
-                      className="pl-11 h-12 bg-secondary/20 border-border focus-visible:ring-primary rounded-xl shadow-none"
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                      required
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="lastName" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Last Name</Label>
-                  <div className="relative">
-                    <User className="absolute left-3.5 top-3.5 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="lastName"
-                      placeholder="Doe"
-                      className="pl-11 h-12 bg-secondary/20 border-border focus-visible:ring-primary rounded-xl shadow-none"
-                      value={lastName}
-                      onChange={(e) => setLastName(e.target.value)}
-                      required
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
             <div className="space-y-2">
               <Label htmlFor="email" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Email Address</Label>
               <div className="relative">
@@ -211,6 +107,7 @@ export default function Login() {
                   id="email"
                   type="email"
                   placeholder="name@example.com"
+                  autoComplete="off"
                   className="pl-11 h-12 bg-secondary/20 border-border focus-visible:ring-primary rounded-xl shadow-none"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -227,6 +124,7 @@ export default function Login() {
                   id="password"
                   type="password"
                   placeholder="••••••••"
+                  autoComplete="off"
                   className="pl-11 h-12 bg-secondary/20 border-border focus-visible:ring-primary rounded-xl shadow-none"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -235,90 +133,10 @@ export default function Login() {
               </div>
             </div>
 
-            {isSignUp && (
-              <>
-                <div className="space-y-2">
-                  <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Select Role</Label>
-                  <Select value={role} onValueChange={(v: any) => {
-                    setRole(v);
-                    setSelectedBranches([]);
-                  }}>
-                    <SelectTrigger className="h-12 bg-secondary/20 border-border rounded-xl shadow-none font-bold">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Sales Person" className="font-bold">Sales Person</SelectItem>
-                      <SelectItem value="Branch Head" className="font-bold">Branch Head</SelectItem>
-                      <SelectItem value="Admin" className="font-bold">Admin</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {role !== 'Admin' && (
-                  <div className="space-y-3 p-4 bg-secondary/10 rounded-2xl border border-border/50">
-                    <div className="flex items-center justify-between px-1">
-                      <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                        {role === 'Sales Person' ? 'Select Branch (Single)' : 'Select Branches (Multiple)'}
-                      </Label>
-                      {role === 'Branch Head' && selectedBranches.length > 0 && (
-                        <button 
-                          type="button"
-                          onClick={() => setSelectedBranches([])}
-                          className="text-[10px] font-bold text-primary hover:underline"
-                        >
-                          Clear All
-                        </button>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
-                      {BRANCHES.map(branch => {
-                        const isSelected = selectedBranches.includes(branch);
-                        return (
-                          <button
-                            key={branch}
-                            type="button"
-                            onClick={() => toggleBranch(branch)}
-                            className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all border text-left ${
-                              isSelected 
-                              ? 'bg-primary/10 border-primary text-primary shadow-sm shadow-primary/10' 
-                              : 'bg-card border-border hover:border-primary/50 text-muted-foreground'
-                            }`}
-                          >
-                            <div className={`w-4 h-4 rounded-sm border flex items-center justify-center transition-all ${
-                              isSelected ? 'bg-primary border-primary' : 'border-muted-foreground/30'
-                            }`}>
-                              {isSelected && <Check size={12} className="text-primary-foreground stroke-[4px]" />}
-                            </div>
-                            <span className="text-xs font-bold truncate">
-                              {branch}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {role === 'Branch Head' && (
-                      <p className="text-[10px] text-muted-foreground text-center italic mt-1 font-medium">
-                        {selectedBranches.length} branches selected
-                      </p>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-
             <Button type="submit" className="w-full h-12 bg-primary hover:bg-primary/90 text-primary-foreground font-black rounded-xl shadow-lg shadow-primary/20 transition-all active:scale-[0.98] mt-4" disabled={loading}>
-              {loading ? (isSignUp ? 'Creating Account...' : 'Signing in...') : (isSignUp ? 'Create Account' : 'Sign In')}
+              {loading ? 'Signing in...' : 'Sign In'}
             </Button>
           </form>
-
-          <div className="text-center pt-2">
-            <button 
-              onClick={() => setIsSignUp(!isSignUp)}
-              className="text-xs font-black text-primary hover:underline uppercase tracking-widest"
-            >
-              {isSignUp ? 'Already have an account? Sign In' : 'Need an account? Create one'}
-            </button>
-          </div>
         </CardContent>
       </Card>
       
