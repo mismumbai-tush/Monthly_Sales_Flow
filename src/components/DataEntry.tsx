@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/src/lib/supabase';
 import { Profile } from '@/src/types';
 import { Card, CardContent } from '@/components/ui/card';
@@ -10,14 +10,27 @@ import { toast } from 'sonner';
 import { UNITS, BRANCHES } from '@/src/constants';
 import { Label } from '@/components/ui/label';
 
+// Helper for generating UUIDs if crypto.randomUUID is not available
+const generateUUID = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const EMPTY_VALUES = MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {});
+
 interface DataEntryProps {
   profile: Profile | null;
   view: 'planning' | 'actuals';
   initialSalespersonId?: string | null;
 }
-
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 interface SalesRow {
   id: string;
@@ -32,6 +45,7 @@ interface SalesRow {
 export default function DataEntry({ profile, view, initialSalespersonId }: DataEntryProps) {
   const [rows, setRows] = useState<SalesRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const fetchingRef = useRef<string | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<string>('');
   const [availableBranches, setAvailableBranches] = useState<string[]>([]);
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
@@ -150,9 +164,8 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
       branches = ['All', ...BRANCHES];
     } else {
       branches = profile.branch_ids || [];
-      // If user has multiple branches, maybe they want an 'All' too? 
-      // But the request specifically mentioned admin login.
       if (branches.length > 1) {
+        // Only show 'All' for Branch Heads if they have multiple branches
         branches = ['All', ...branches];
       }
     }
@@ -167,13 +180,23 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
   }, [profile]);
 
   useEffect(() => {
-    fetchExistingData();
+    const timer = setTimeout(() => {
+      fetchExistingData();
+    }, 400); // 400ms debounce
+    return () => clearTimeout(timer);
   }, [view, selectedBranch, selectedYear, selectedSalesperson]);
 
   const fetchExistingData = async () => {
-    if (!profile || !selectedBranch) return;
+    if (!profile || !selectedBranch || selectedBranch === 'default_branch') return;
+    
+    // Safety check to prevent recursive loops
+    const currentParams = `${view}-${selectedBranch}-${selectedYear}-${selectedSalesperson}`;
+    if (fetchingRef.current === currentParams) return;
+    fetchingRef.current = currentParams;
+
     setLoading(true);
     console.log(`FETCHING DATA: View=${view}, Branch=${selectedBranch}, Year=${selectedYear}, Salesperson=${selectedSalesperson}`);
+    
     try {
       // Step 1: Fetch the "Master List" of active customers/units for this context
       // We look at the selected year AND the previous year to give them continuity
@@ -231,8 +254,8 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
           
         if (!yearGrouped[key]) {
           yearGrouped[key] = {
-            targets: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
-            actuals: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
+            targets: { ...EMPTY_VALUES },
+            actuals: { ...EMPTY_VALUES },
             dbIds: {},
             salespersonIds: {},
             branch_id: item.branch_id
@@ -273,8 +296,8 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
         // Normal single branch logic
         masterRows.forEach((val, key) => {
           const yearInfo = yearGrouped[key] || {
-            targets: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
-            actuals: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
+            targets: { ...EMPTY_VALUES },
+            actuals: { ...EMPTY_VALUES },
             dbIds: {},
             salespersonIds: {},
             branch_id: selectedBranch
@@ -301,8 +324,8 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
           id: Math.random().toString(36).substring(2, 11),
           customerName: '',
           unit: '',
-          targets: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
-          actuals: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
+          targets: { ...EMPTY_VALUES },
+          actuals: { ...EMPTY_VALUES },
           salespersonIds: {}
         }));
       }
@@ -313,6 +336,7 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
       toast.error('Failed to fetch data: ' + error.message);
     } finally {
       setLoading(false);
+      fetchingRef.current = null;
     }
   };
 
@@ -321,8 +345,8 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
       id: Math.random().toString(36).substring(2, 11),
       customerName: '',
       unit: '',
-      targets: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
-      actuals: MONTHS.reduce((acc, m) => ({ ...acc, [m]: 0 }), {}),
+      targets: { ...EMPTY_VALUES },
+      actuals: { ...EMPTY_VALUES },
       salespersonIds: {}
     }]);
   };
@@ -410,11 +434,11 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
     setLoading(true);
     const combinedPayload: any[] = [];
     
-    // Timeout safeguard - reduced to 20s for faster failure feedback
+    // Timeout safeguard - increased to 60s
     const timeoutId = setTimeout(() => {
       setLoading(false);
       toast.error('Save request timed out. Please try again.');
-    }, 20000);
+    }, 60000);
 
     try {
       // Determine which months to process (all months or just the selected one)
@@ -431,21 +455,26 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
 
         monthsToProcess.forEach(month => {
           const entry: any = {
-            customer_name: row.customerName,
-            unit_name: row.unit,
+            customer_name: row.customer_name || row.customerName,
+            unit_name: row.unit_name || row.unit,
             month,
             year: selectedYear,
             target_amount: row.targets[month] || 0,
             actual_amount: row.actuals[month] || 0,
-            salesperson_id: row.salespersonIds?.[month] || targetSalespersonId,
-            branch_id: selectedBranch,
-            target_unit: 0,
-            actual_unit: 0
+            salesperson_id: row.salespersonIds?.[month] || targetSalespersonId || (row as any).salesperson_id,
+            branch_id: selectedBranch !== 'All' ? selectedBranch : (row as any).branch_id || (row as any).branchId,
+            target_unit: (row as any).target_unit || 0,
+            actual_unit: (row as any).actual_unit || 0
           };
 
-          // If it exists in DB, include ID to update
-          if (row.dbIds?.[month]) {
-            entry.id = row.dbIds[month];
+          // If it exists in DB, include ID to update, otherwise generate a new one
+          const existingId = row.dbIds?.[month];
+          if (existingId && typeof existingId === 'string' && existingId.length > 0) {
+            entry.id = existingId;
+          } else {
+            // ALWAYS generate an ID for records if we don't have one
+            // This prevents "null value in column 'id'" errors if DB has no default
+            entry.id = generateUUID();
           }
 
           // Only push if it's an update OR if it has some non-zero values
@@ -457,9 +486,15 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
 
       if (combinedPayload.length > 0) {
         console.log(`SUBMIT: Sending ${combinedPayload.length} records to Supabase`);
-        const { error } = await supabase.from('sales_data').upsert(combinedPayload);
+        const { error } = await supabase.from('sales_data').upsert(combinedPayload, { onConflict: 'id' });
         if (error) {
-          console.error('Supabase Upsert Error:', error);
+          console.error('Supabase Upsert Error Detailed:', {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+            hint: error.hint,
+            firstRecord: combinedPayload[0]
+          });
           throw error;
         }
         toast.success(view === 'planning' ? 'Target Planning submitted!' : 'Actual Entry saved!');
@@ -524,7 +559,8 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
             salesperson_id: targetSalespersonId,
             branch_id: selectedBranch,
             target_unit: 0,
-            actual_unit: 0
+            actual_unit: 0,
+            id: generateUUID()
           });
         }
       }
@@ -547,14 +583,15 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
 
         const finalPayload = payload.map(p => {
           const match = existingRecords?.find(er => er.unit_name === p.unit_name);
-          if (match) {
+          if (match && match.id) {
             return { ...p, id: match.id };
           }
-          return p;
+          // If no match, provide a new ID to ensure no null constraint issues
+          return { ...p, id: generateUUID() };
         });
 
         console.log('BULK SUBMIT: Upserting records...', finalPayload.length);
-        const { error } = await supabase.from('sales_data').upsert(finalPayload);
+        const { error } = await supabase.from('sales_data').upsert(finalPayload, { onConflict: 'id' });
         console.log('BULK SUBMIT: Upsert result:', { error });
         if (error) throw error;
       }
@@ -959,7 +996,7 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
                     variant="ghost" 
                     size="icon" 
                     onClick={() => handleDeleteRow(row)}
-                    disabled={loading}
+                    disabled={loading || (selectedBranch === 'All' && profile?.role !== 'Admin' && profile?.role !== 'Branch Head')}
                     title="Delete row"
                     className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-full transition-colors"
                   >

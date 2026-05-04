@@ -4,9 +4,9 @@ import { Profile } from '@/src/types';
 import Login from '@/src/components/Login';
 import { toast } from 'sonner';
 
-const Dashboard = lazy(() => import('@/src/components/Dashboard'));
-const DataEntry = lazy(() => import('@/src/components/DataEntry'));
-const Branches = lazy(() => import('@/src/components/Branches'));
+import Dashboard from '@/src/components/Dashboard';
+import DataEntry from '@/src/components/DataEntry';
+import Branches from '@/src/components/Branches';
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -60,11 +60,14 @@ export default function App() {
 
   // Safety timeout for loading state
   useEffect(() => {
+    if (!loading) return;
+    
     const timer = setTimeout(() => {
-      if (loading) {
-        setShowForceRefresh(true);
-      }
-    }, 15000); // Increased to 15s to be more patient with cold connections
+      setShowForceRefresh(true);
+      // If it's taking too long, maybe we should stop the spinner
+      setLoading(false);
+    }, 15000); // Back to 15s for stability
+    
     return () => clearTimeout(timer);
   }, [loading]);
 
@@ -72,7 +75,6 @@ export default function App() {
     if (fetchingRef.current === userId) return;
     fetchingRef.current = userId;
     
-    console.log('--- fetchProfile START for', email || userId);
     try {
       // Fetch profile from database
       const { data, error } = await supabase
@@ -86,18 +88,20 @@ export default function App() {
       }
       
       if (data) {
-        console.log('--- profile FOUND:', data.full_name, 'Role:', data.role);
         setProfile(data);
       } else {
-        console.log('--- no profile record found yet, using session metadata if available');
+        // Fallback to metadata
         const { data: sessData } = await supabase.auth.getSession();
         const user = sessData.session?.user;
         if (user) {
-          const metadata = user.user_metadata;
+          const metadata = user.user_metadata || {};
           setProfile({
+            id: user.id,
+            email: user.email || email,
             full_name: metadata.full_name || user.email?.split('@')[0] || 'Personnel',
+            role: metadata.role || 'Sales Person',
             branch_ids: metadata.branch_ids || []
-          });
+          } as any);
         }
       }
     } catch (error) {
@@ -119,31 +123,23 @@ export default function App() {
 
     // Consolidate auth initialization
     const initAuth = async () => {
-      if (authInitializedRef.current) return;
-      authInitializedRef.current = true;
-      
-      console.log('INITIALIZE: Step 1 (Auth Check)');
-      
       try {
-        // Get current session once
-        const { data: { session: initialSession }, error: sessionError } = await supabase.auth.getSession();
+        const { data: { session: initialSession } } = await supabase.auth.getSession();
         
         if (!mounted) return;
 
         if (initialSession) {
-          console.log('INITIALIZE: Step 2 (Session Found via getSession)');
           setSession(initialSession);
           await fetchProfile(initialSession.user.id, initialSession.user.email);
         } else {
-          console.log('INITIALIZE: Step 2 (No session from getSession, waiting for auth listener)');
-          // If no session from getSession, check if we're already loading via onAuthStateChange
-          // We give it a bit more time for the listener, otherwise we stop loading
-          setTimeout(() => {
-            if (mounted && loading && !session) {
-              console.log('INITIALIZE: Step 3 (Final fallback - no user detected)');
-              setLoading(false);
-            }
-          }, 2000);
+          // If no session from getSession, check for local storage session
+          // or just wait for the auth listener
+          const { data: { user } } = await supabase.auth.getUser().catch(() => ({ data: { user: null } }));
+          if (user) {
+            await fetchProfile(user.id, user.email);
+          } else {
+            setLoading(false);
+          }
         }
       } catch (err) {
         console.error('INITIALIZE: Error:', err);
@@ -154,19 +150,20 @@ export default function App() {
     initAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
-      console.log('--- AUTH EVENT:', event, currentSession?.user?.email);
       if (!mounted) return;
+      authInitializedRef.current = true;
       
+      console.log('--- AUTH EVENT:', event);
+      setSession(currentSession);
+
       if (event === 'SIGNED_OUT') {
-        setSession(null);
         setProfile(null);
         setLoading(false);
         fetchingRef.current = null;
       } else if (currentSession) {
-        setSession(currentSession);
-        if (currentSession.user?.id) {
-          await fetchProfile(currentSession.user.id, currentSession.user.email);
-        }
+        await fetchProfile(currentSession.user.id, currentSession.user.email);
+      } else if (event === 'INITIAL_SESSION' && !currentSession) {
+        setLoading(false);
       }
     });
 
@@ -489,24 +486,16 @@ export default function App() {
             </TabsList>
 
             <TabsContent value="dashboard" className="mt-0 flex-1 outline-none ring-offset-background">
-              <Suspense fallback={<DashboardSkeleton />}>
-                <Dashboard profile={profile} />
-              </Suspense>
+              <Dashboard profile={profile} />
             </TabsContent>
             <TabsContent value="target-planning" className="mt-0 flex-1 outline-none ring-offset-background">
-              <Suspense fallback={<DataEntrySkeleton />}>
-                <DataEntry profile={profile} view="planning" />
-              </Suspense>
+              <DataEntry profile={profile} view="planning" />
             </TabsContent>
             <TabsContent value="actual-entry" className="mt-0 flex-1 outline-none ring-offset-background">
-              <Suspense fallback={<DataEntrySkeleton />}>
-                <DataEntry profile={profile} view="actuals" initialSalespersonId={drillDownEmployeeId} />
-              </Suspense>
+              <DataEntry profile={profile} view="actuals" initialSalespersonId={drillDownEmployeeId} />
             </TabsContent>
             <TabsContent value="branches" className="mt-0 flex-1 outline-none ring-offset-background">
-              <Suspense fallback={<DashboardSkeleton />}>
-                <Branches profile={profile} onEmployeeClick={handleDrillDown} />
-              </Suspense>
+              <Branches profile={profile} onEmployeeClick={handleDrillDown} />
             </TabsContent>
           </Tabs>
         </div>
