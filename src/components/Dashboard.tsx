@@ -16,6 +16,8 @@ import { UNITS, BRANCHES } from '@/src/constants';
 
 interface DashboardProps {
   profile: Profile | null;
+  active?: boolean;
+  refreshKey?: number;
 }
 
 const MONTHS = [
@@ -25,7 +27,7 @@ const MONTHS = [
 
 const YEARS = Array.from({ length: 13 }, (_, i) => 2024 + i);
 
-export default function Dashboard({ profile }: DashboardProps) {
+export default function Dashboard({ profile, active, refreshKey }: DashboardProps) {
   const [data, setData] = useState<SalesData[]>([]);
   const [loading, setLoading] = useState(true);
   const [salespersons, setSalespersons] = useState<Profile[]>([]);
@@ -65,7 +67,7 @@ export default function Dashboard({ profile }: DashboardProps) {
 
   const fetchData = useCallback(async () => {
     if (!profileId) return;
-    setLoading(true);
+    setIsRefreshing(true);
     try {
       let query = supabase.from('sales_data').select('*');
 
@@ -84,8 +86,6 @@ export default function Dashboard({ profile }: DashboardProps) {
         if (branches.length > 0) {
           query = query.in('branch_id', branches);
         } else {
-          // If branch head has no branches, they shouldn't see anything or just their own?
-          // Usually they have at least one. If none, we filter by an impossible branch to be safe
           query = query.eq('branch_id', 'no_branch_assigned');
         }
       }
@@ -97,8 +97,9 @@ export default function Dashboard({ profile }: DashboardProps) {
       console.error('Error fetching sales data:', error);
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
-  }, [profileId, profileRole, profile?.branch_ids, filters.year]);
+  }, [profileId, profileRole, profile?.branch_ids, filters.year, refreshKey]);
 
   useEffect(() => {
     if (profileId) {
@@ -106,6 +107,13 @@ export default function Dashboard({ profile }: DashboardProps) {
       fetchSalespersons();
     }
   }, [profileId, fetchData, fetchSalespersons]);
+
+  // Refresh when tab becomes active or data changes
+  useEffect(() => {
+    if ((active || refreshKey) && profileId) {
+      fetchData();
+    }
+  }, [active, refreshKey, profileId, fetchData]);
 
   const availableSalespersons = useMemo(() => {
     let list = salespersons;

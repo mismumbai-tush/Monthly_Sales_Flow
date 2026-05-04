@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '@/src/lib/supabase';
 import { Profile, SalesData } from '@/src/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,12 +14,16 @@ import { Button } from '@/components/ui/button';
 interface BranchesProps {
   profile: Profile | null;
   onEmployeeClick?: (employeeId: string) => void;
+  active?: boolean;
+  onDataChange?: () => void;
+  refreshKey?: number;
 }
 
-export default function Branches({ profile, onEmployeeClick }: BranchesProps) {
+export default function Branches({ profile, onEmployeeClick, active, onDataChange, refreshKey }: BranchesProps) {
   const [data, setData] = useState<SalesData[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Top-level filters
   const [selectedBranch, setSelectedBranch] = useState<string>('All');
@@ -35,47 +39,51 @@ export default function Branches({ profile, onEmployeeClick }: BranchesProps) {
     return profile?.branch_ids || [];
   }, [profile]);
 
-  useEffect(() => {
-    async function fetchData() {
-      if (!profile) return;
-      setLoading(true);
-      try {
-        // Fetch sales data
-        let query = supabase.from('sales_data').select('*');
-        query = query.eq('year', selectedYear);
-        if (selectedMonth !== 'All') {
-          query = query.eq('month', selectedMonth);
-        }
-
-        // Branch filtering
-        const branchToQuery = selectedBranch === 'All' ? availableBranches.filter(b => b !== 'All') : [selectedBranch];
-        if (branchToQuery.length > 0) {
-          query = query.in('branch_id', branchToQuery);
-        }
-
-        const { data: sales, error } = await query;
-        if (error) throw error;
-        setData(sales || []);
-
-        // Fetch users/profiles for the employee filter if we're in detailed view or we need them for the employee dropdown
-        let pQuery = supabase.from('profiles').select('*');
-        if (profile.role === 'Branch Head' && profile.branch_ids && profile.branch_ids.length > 0) {
-          pQuery = pQuery.contains('branch_ids', [detailedBranch || profile.branch_ids[0]]);
-        } else if (detailedBranch && detailedBranch !== 'All') {
-          pQuery = pQuery.contains('branch_ids', [detailedBranch]);
-        }
-        
-        const { data: pData } = await pQuery;
-        setProfiles(pData || []);
-
-      } catch (error) {
-        console.error('Error fetching branch data:', error);
-      } finally {
-        setLoading(false);
+  const fetchData = useCallback(async () => {
+    if (!profile) return;
+    setIsRefreshing(true);
+    try {
+      // Fetch sales data
+      let query = supabase.from('sales_data').select('*');
+      query = query.eq('year', selectedYear);
+      if (selectedMonth !== 'All') {
+        query = query.eq('month', selectedMonth);
       }
+
+      // Branch filtering
+      const branchToQuery = selectedBranch === 'All' ? availableBranches.filter(b => b !== 'All') : [selectedBranch];
+      if (branchToQuery.length > 0) {
+        query = query.in('branch_id', branchToQuery);
+      }
+
+      const { data: sales, error } = await query;
+      if (error) throw error;
+      setData(sales || []);
+
+      // Fetch users/profiles for the employee filter 
+      let pQuery = supabase.from('profiles').select('*').in('role', ['Sales Person', 'Branch Head']);
+      
+      const { data: pData } = await pQuery;
+      setProfiles(pData || []);
+
+    } catch (error) {
+      console.error('Error fetching branch data:', error);
+    } finally {
+      setLoading(false);
+      setIsRefreshing(false);
     }
+  }, [profile, selectedYear, selectedMonth, selectedBranch, availableBranches, refreshKey]);
+
+  useEffect(() => {
     fetchData();
-  }, [profile, selectedYear, selectedMonth, selectedBranch, detailedBranch, availableBranches]);
+  }, [fetchData]);
+
+  // Refresh when tab becomes active or data changes
+  useEffect(() => {
+    if ((active || refreshKey) && profile) {
+      fetchData();
+    }
+  }, [active, refreshKey, profile, fetchData]);
 
   const branchPerformance = useMemo(() => {
     const branchesToShow = selectedBranch === 'All' 

@@ -4,9 +4,9 @@ import { Profile } from '@/src/types';
 import Login from '@/src/components/Login';
 import { toast } from 'sonner';
 
-import Dashboard from '@/src/components/Dashboard';
-import DataEntry from '@/src/components/DataEntry';
-import Branches from '@/src/components/Branches';
+const Dashboard = lazy(() => import('@/src/components/Dashboard'));
+const DataEntry = lazy(() => import('@/src/components/DataEntry'));
+const Branches = lazy(() => import('@/src/components/Branches'));
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -46,6 +46,11 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [drillDownEmployeeId, setDrillDownEmployeeId] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const triggerRefresh = useCallback(() => {
+    setRefreshKey(prev => prev + 1);
+  }, []);
 
   const handleDrillDown = useCallback((employeeId: string) => {
     setDrillDownEmployeeId(employeeId);
@@ -131,15 +136,10 @@ export default function App() {
         if (initialSession) {
           setSession(initialSession);
           await fetchProfile(initialSession.user.id, initialSession.user.email);
+          if (mounted) setLoading(false);
         } else {
-          // If no session from getSession, check for local storage session
-          // or just wait for the auth listener
-          const { data: { user } } = await supabase.auth.getUser().catch(() => ({ data: { user: null } }));
-          if (user) {
-            await fetchProfile(user.id, user.email);
-          } else {
-            setLoading(false);
-          }
+          console.log('--- NO INITIAL SESSION FOUND ---');
+          if (mounted) setLoading(false);
         }
       } catch (err) {
         console.error('INITIALIZE: Error:', err);
@@ -153,16 +153,17 @@ export default function App() {
       if (!mounted) return;
       authInitializedRef.current = true;
       
-      console.log('--- AUTH EVENT:', event);
-      setSession(currentSession);
-
-      if (event === 'SIGNED_OUT') {
+      console.log('--- AUTH EVENT:', event, 'SESSION:', currentSession?.user?.email);
+      
+      if (event === 'SIGNED_OUT' || (event === 'INITIAL_SESSION' && !currentSession)) {
+        setSession(null);
         setProfile(null);
         setLoading(false);
         fetchingRef.current = null;
       } else if (currentSession) {
+        setSession(currentSession);
+        // We use a local fetch check to avoid closures/stale state issues
         await fetchProfile(currentSession.user.id, currentSession.user.email);
-      } else if (event === 'INITIAL_SESSION' && !currentSession) {
         setLoading(false);
       }
     });
@@ -486,16 +487,24 @@ export default function App() {
             </TabsList>
 
             <TabsContent value="dashboard" className="mt-0 flex-1 outline-none ring-offset-background">
-              <Dashboard profile={profile} />
+              <Suspense fallback={<DashboardSkeleton />}>
+                <Dashboard profile={profile} active={activeTab === 'dashboard'} refreshKey={refreshKey} />
+              </Suspense>
             </TabsContent>
             <TabsContent value="target-planning" className="mt-0 flex-1 outline-none ring-offset-background">
-              <DataEntry profile={profile} view="planning" />
+              <Suspense fallback={<DataEntrySkeleton />}>
+                <DataEntry profile={profile} view="planning" onDataChange={triggerRefresh} refreshKey={refreshKey} />
+              </Suspense>
             </TabsContent>
             <TabsContent value="actual-entry" className="mt-0 flex-1 outline-none ring-offset-background">
-              <DataEntry profile={profile} view="actuals" initialSalespersonId={drillDownEmployeeId} />
+              <Suspense fallback={<DataEntrySkeleton />}>
+                <DataEntry profile={profile} view="actuals" initialSalespersonId={drillDownEmployeeId} onDataChange={triggerRefresh} refreshKey={refreshKey} />
+              </Suspense>
             </TabsContent>
             <TabsContent value="branches" className="mt-0 flex-1 outline-none ring-offset-background">
-              <Branches profile={profile} onEmployeeClick={handleDrillDown} />
+              <Suspense fallback={<DashboardSkeleton />}>
+                <Branches profile={profile} onEmployeeClick={handleDrillDown} active={activeTab === 'branches'} onDataChange={triggerRefresh} refreshKey={refreshKey} />
+              </Suspense>
             </TabsContent>
           </Tabs>
         </div>

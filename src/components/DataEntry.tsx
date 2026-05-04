@@ -30,6 +30,8 @@ interface DataEntryProps {
   profile: Profile | null;
   view: 'planning' | 'actuals';
   initialSalespersonId?: string | null;
+  onDataChange?: () => void;
+  refreshKey?: number;
 }
 
 interface SalesRow {
@@ -38,11 +40,16 @@ interface SalesRow {
   unit: string;
   targets: Record<string, number>;
   actuals: Record<string, number>;
-  dbIds?: Record<string, string>; // Map month to DB row ID
-  salespersonIds?: Record<string, string>; // Map month to original salesperson ID
+  dbIds?: Record<string, string>;
+  salespersonIds?: Record<string, string>;
+  branchId?: string;
+  salespersonId?: string;
+  salespersonName?: string;
 }
 
-export default function DataEntry({ profile, view, initialSalespersonId }: DataEntryProps) {
+type SalesDataRow = SalesRow;
+
+export default function DataEntry({ profile, view, initialSalespersonId, onDataChange, refreshKey }: DataEntryProps) {
   const [rows, setRows] = useState<SalesRow[]>([]);
   const [loading, setLoading] = useState(false);
   const fetchingRef = useRef<string | null>(null);
@@ -184,13 +191,13 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
       fetchExistingData();
     }, 400); // 400ms debounce
     return () => clearTimeout(timer);
-  }, [view, selectedBranch, selectedYear, selectedSalesperson]);
+  }, [view, selectedBranch, selectedYear, selectedSalesperson, refreshKey]);
 
   const fetchExistingData = async () => {
     if (!profile || !selectedBranch || selectedBranch === 'default_branch') return;
     
     // Safety check to prevent recursive loops
-    const currentParams = `${view}-${selectedBranch}-${selectedYear}-${selectedSalesperson}`;
+    const currentParams = `${view}-${selectedBranch}-${selectedYear}-${selectedSalesperson}-${refreshKey}`;
     if (fetchingRef.current === currentParams) return;
     fetchingRef.current = currentParams;
 
@@ -202,7 +209,7 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
       // We look at the selected year AND the previous year to give them continuity
       let masterQuery = supabase
         .from('sales_data')
-        .select('customer_name, unit_name, branch_id')
+        .select('customer_name, unit_name, branch_id, salesperson_id')
         .or(`year.eq.${selectedYear},year.eq.${selectedYear - 1}`);
 
       if (selectedBranch !== 'All') {
@@ -217,9 +224,12 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
 
       const { data: masterData } = await masterQuery;
 
+      // Filter out any entries with empty customer name to prevent blank rows
+      const validMasterData = (masterData || []).filter(item => item.customer_name && item.customer_name.trim() !== '');
+
       // Unique combinations of customer and unit
       const masterRows = new Map<string, { customer: string; unit: string }>();
-      (masterData || []).forEach(item => {
+      validMasterData.forEach(item => {
         const key = `${item.customer_name}-${item.unit_name}`;
         if (!masterRows.has(key)) {
           masterRows.set(key, { customer: item.customer_name, unit: item.unit_name });
@@ -245,12 +255,17 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
       const { data: yearData, error } = await dataQuery;
       if (error) throw error;
 
-      // Group actual year data - include branch_id in key if 'All' is selected
+      // Group actual year data
       const yearGrouped: Record<string, any> = {};
       (yearData || []).forEach(item => {
-        const key = selectedBranch === 'All' 
-          ? `${item.branch_id}-${item.customer_name}-${item.unit_name}`
-          : `${item.customer_name}-${item.unit_name}`;
+        // Create a unique key that includes salesperson if viewing all salespeople
+        let key = `${item.customer_name}-${item.unit_name}`;
+        if (selectedBranch === 'All') {
+          key = `${item.branch_id}-${key}`;
+        }
+        if (selectedSalesperson === 'All') {
+          key = `${item.salesperson_id}-${key}`;
+        }
           
         if (!yearGrouped[key]) {
           yearGrouped[key] = {
@@ -258,63 +273,74 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
             actuals: { ...EMPTY_VALUES },
             dbIds: {},
             salespersonIds: {},
-            branch_id: item.branch_id
+            branch_id: item.branch_id,
+            salesperson_id: item.salesperson_id
           };
         }
-        yearGrouped[key].targets[item.month] = item.target_amount;
-        yearGrouped[key].actuals[item.month] = item.actual_amount;
+        yearGrouped[key].targets[item.month] = (yearGrouped[key].targets[item.month] || 0) + item.target_amount;
+        yearGrouped[key].actuals[item.month] = (yearGrouped[key].actuals[item.month] || 0) + item.actual_amount;
         yearGrouped[key].dbIds[item.month] = item.id;
         yearGrouped[key].salespersonIds[item.month] = item.salesperson_id;
       });
 
+      // Group master data similarly
+      const masterKeys = new Set<string>();
+      (masterData || []).forEach(item => {
+        let key = `${item.customer_name}-${item.unit_name}`;
+        if (selectedBranch === 'All') {
+          key = `${item.branch_id}-${key}`;
+        }
+        if (selectedSalesperson === 'All' && item.salesperson_id) {
+          key = `${item.salesperson_id}-${key}`;
+        }
+        masterKeys.add(key);
+      });
+
       // Step 3: Combine Master list with Year Data
-      const finalRowMap: Record<string, SalesRow & { branchId?: string }> = {};
+      const finalRowMap: Record<string, SalesDataRow> = {};
       
-      // If selectedBranch is 'All', we use the yearData as the primary source for rows 
-      // because a "Master List" across ALL branches without specific branch context for new entries would be messy.
-      
-      if (selectedBranch === 'All') {
-        Object.keys(yearGrouped).forEach(key => {
-          const yearInfo = yearGrouped[key];
-          const parts = key.split('-');
-          const branchId = parts[0];
-          const customer = parts[1];
-          const unit = parts[2];
-          
-          finalRowMap[key] = {
-            id: Object.values(yearInfo.dbIds)[0] as string || key,
-            customerName: customer,
-            unit: unit,
-            targets: yearInfo.targets,
-            actuals: yearInfo.actuals,
-            dbIds: yearInfo.dbIds,
-            salespersonIds: yearInfo.salespersonIds,
-            branchId: yearInfo.branch_id
-          };
-        });
-      } else {
-        // Normal single branch logic
-        masterRows.forEach((val, key) => {
+      const addToMap = (item: any) => {
+        let key = `${item.customer_name}-${item.unit_name}`;
+        if (selectedBranch === 'All') {
+          key = `${item.branch_id}-${key}`;
+        }
+        if (selectedSalesperson === 'All') {
+          key = `${item.salesperson_id}-${key}`;
+        }
+
+        if (!finalRowMap[key]) {
           const yearInfo = yearGrouped[key] || {
             targets: { ...EMPTY_VALUES },
             actuals: { ...EMPTY_VALUES },
             dbIds: {},
             salespersonIds: {},
-            branch_id: selectedBranch
+            branch_id: item.branch_id,
+            salesperson_id: item.salesperson_id
           };
+
+          const sp = salespeople.find(s => s.id === yearInfo.salesperson_id);
 
           finalRowMap[key] = {
             id: (yearInfo.dbIds && Object.values(yearInfo.dbIds)[0]) as string || key,
-            customerName: val.customer,
-            unit: val.unit,
+            customerName: item.customer_name,
+            unit: item.unit_name,
             targets: yearInfo.targets,
             actuals: yearInfo.actuals,
             dbIds: yearInfo.dbIds,
             salespersonIds: yearInfo.salespersonIds,
-            branchId: selectedBranch
+            branchId: yearInfo.branch_id,
+            salespersonId: yearInfo.salesperson_id,
+            salespersonName: sp?.full_name
           };
-        });
-      }
+        }
+      };
+
+      // Process year data first to ensure we have the latest salesperson/branch context
+      const validYearData = (yearData || []).filter(item => item.customer_name && item.customer_name.trim() !== '');
+      validYearData.forEach(item => addToMap(item));
+      
+      // Process master data for anything missing
+      validMasterData.forEach(item => addToMap(item));
 
       let finalRows = Object.values(finalRowMap);
 
@@ -499,6 +525,9 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
         }
         toast.success(view === 'planning' ? 'Target Planning submitted!' : 'Actual Entry saved!');
         
+        // Notify parent of data change
+        if (onDataChange) onDataChange();
+        
         // Refresh data in background
         fetchExistingData();
       } else {
@@ -601,6 +630,7 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
       setBulkMonth('');
       setBulkCustomer('');
       setBulkTargets({});
+      if (onDataChange) onDataChange();
       await fetchExistingData();
     } catch (error: any) {
       console.error('Bulk Save Error Details:', error);
@@ -882,13 +912,18 @@ export default function DataEntry({ profile, view, initialSalespersonId }: DataE
                       disabled={view === 'actuals' || loading}
                       className="border-none shadow-none focus-visible:ring-0 h-9 font-black text-[13px] bg-transparent disabled:opacity-50 px-1 uppercase tracking-tight placeholder:text-muted-foreground/20"
                     />
-                    <div className="lg:hidden flex flex-wrap gap-1.5 px-1">
-                      <span className="text-[9px] font-black uppercase text-primary bg-primary/10 px-2 py-0.5 rounded-full border border-primary/20">
+                    <div className="flex flex-wrap gap-1.5 px-1">
+                      <span className="text-[9px] font-black uppercase text-primary bg-primary/10 px-2 py-0.5 rounded-full border border-primary/20 lg:hidden">
                         {row.unit || 'NO UNIT'}
                       </span>
-                      {selectedBranch === 'All' && (row as any).branchId && (
-                        <span className="text-[9px] font-black uppercase text-accent bg-accent/10 px-2 py-0.5 rounded-full border border-accent/20">
-                          🏢 {(row as any).branchId}
+                      {selectedBranch === 'All' && row.branchId && (
+                        <span className="text-[9px] font-black uppercase text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
+                          🏢 {row.branchId}
+                        </span>
+                      )}
+                      {(selectedSalesperson === 'All' || selectedBranch === 'All') && row.salespersonName && (
+                        <span className="text-[9px] font-black uppercase text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200 flex items-center gap-1">
+                          👤 {row.salespersonName}
                         </span>
                       )}
                     </div>
